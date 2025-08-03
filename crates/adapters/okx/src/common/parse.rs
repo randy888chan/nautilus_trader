@@ -135,12 +135,24 @@ where
 
 /// Returns the currency either from the internal currency map or creates a default crypto.
 fn get_currency(code: &str) -> Currency {
+    if code.is_empty() {
+        return Currency::new("UNKNOWN", 8, 0, "UNKNOWN", CurrencyType::Crypto);
+    }
     CURRENCY_MAP
         .lock()
         .unwrap()
         .get(code)
         .copied()
         .unwrap_or(Currency::new(code, 8, 0, code, CurrencyType::Crypto))
+}
+
+/// Helper function to safely parse quantity strings, returning a default value for empty strings.
+fn parse_quantity_or_default(value: &str, default: &str) -> Quantity {
+    if value.is_empty() {
+        Quantity::from(default)
+    } else {
+        Quantity::from(value)
+    }
 }
 
 /// Returns the [`OKXInstrumentType`] that corresponds to the supplied
@@ -783,18 +795,22 @@ fn parse_common_instrument_data(
     let instrument_id = parse_instrument_id(definition.inst_id);
     let raw_symbol = Symbol::from_ustr_unchecked(definition.inst_id);
 
-    let price_increment = Price::from_str(&definition.tick_sz).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to parse tick_sz '{}' into Price: {}",
-            definition.tick_sz,
-            e
-        )
-    })?;
+    let price_increment = if definition.tick_sz.is_empty() {
+        Price::from("0.01") // Default fallback for empty tick_sz
+    } else {
+        Price::from_str(&definition.tick_sz).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to parse tick_sz '{}' into Price: {}",
+                definition.tick_sz,
+                e
+            )
+        })?
+    };
 
-    let size_increment = Quantity::from(&definition.lot_sz);
-    let lot_size = Some(Quantity::from(&definition.lot_sz));
-    let max_quantity = Some(Quantity::from(&definition.max_mkt_sz));
-    let min_quantity = Some(Quantity::from(&definition.min_sz));
+    let size_increment = parse_quantity_or_default(&definition.lot_sz, "1");
+    let lot_size = Some(parse_quantity_or_default(&definition.lot_sz, "1"));
+    let max_quantity = Some(parse_quantity_or_default(&definition.max_mkt_sz, "1000000"));
+    let min_quantity = Some(parse_quantity_or_default(&definition.min_sz, "0.00000001"));
     let max_notional: Option<Money> = None;
     let min_notional: Option<Money> = None;
     let max_price = None; // TBD
@@ -927,14 +943,18 @@ pub fn parse_swap_instrument(
             anyhow::bail!("Invalid contract type for swap: {}", definition.ct_type)
         }
     };
-    let price_increment = match Price::from_str(&definition.tick_sz) {
-        Ok(price) => price,
-        Err(e) => {
-            anyhow::bail!(
-                "Failed to parse tick_size '{}' into Price: {}",
-                definition.tick_sz,
-                e
-            );
+    let price_increment = if definition.tick_sz.is_empty() {
+        Price::from("0.01") // Default fallback for empty tick_sz
+    } else {
+        match Price::from_str(&definition.tick_sz) {
+            Ok(price) => price,
+            Err(e) => {
+                anyhow::bail!(
+                    "Failed to parse tick_size '{}' into Price: {}",
+                    definition.tick_sz,
+                    e
+                );
+            }
         }
     };
     let size_increment = Quantity::from(&definition.lot_sz);
