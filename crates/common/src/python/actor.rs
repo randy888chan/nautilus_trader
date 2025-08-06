@@ -52,8 +52,7 @@ use crate::{
     },
     cache::Cache,
     clock::Clock,
-    component::Component,
-    enums::ComponentState,
+    enums::ActorState,
     python::{clock::PyClock, logging::PyLogger},
     signal::Signal,
     timer::{TimeEvent, TimeEventCallback},
@@ -434,7 +433,7 @@ impl PyDataActor {
     }
 
     #[pyo3(name = "state")]
-    fn py_state(&self) -> ComponentState {
+    fn py_state(&self) -> ActorState {
         self.state()
     }
 
@@ -1415,11 +1414,10 @@ mod tests {
 
     use super::PyDataActor;
     use crate::{
-        actor::{DataActor, data_actor::DataActorCore},
+        actor::{Actor, DataActor, data_actor::DataActorCore},
         cache::Cache,
         clock::TestClock,
-        component::Component,
-        enums::ComponentState,
+        enums::ActorState,
         runner::{SyncDataCommandSender, set_data_cmd_sender},
         signal::Signal,
         timer::TimeEvent,
@@ -1548,7 +1546,7 @@ mod tests {
 
         let actor = create_registered_actor(clock, cache, trader_id);
 
-        assert_eq!(actor.state(), ComponentState::Ready);
+        assert_eq!(actor.state(), ActorState::Ready);
         assert_eq!(actor.trader_id(), Some(TraderId::from("TRADER-001")));
         assert!(actor.py_is_ready());
         assert!(!actor.py_is_running());
@@ -1660,7 +1658,7 @@ mod tests {
 
         let actor = create_registered_actor(clock, cache, trader_id);
         let state = actor.state();
-        assert_eq!(state, ComponentState::Ready);
+        assert_eq!(state, ActorState::Ready);
     }
 
     // Test actor that tracks method calls for verification
