@@ -1,0 +1,69 @@
+from nautilus_trader.common.config import OrderEmulatorConfig
+from stubs.cache.cache import Cache
+from stubs.common.actor import Actor
+from stubs.common.component import Clock
+from stubs.common.component import MessageBus
+from stubs.core.message import Event
+from stubs.execution.manager import OrderManager
+from stubs.execution.matching_core import MatchingCore
+from stubs.execution.messages import SubmitOrder
+from stubs.execution.messages import TradingCommand
+from stubs.model.data import QuoteTick
+from stubs.model.data import TradeTick
+from stubs.model.identifiers import ClientOrderId
+from stubs.model.identifiers import InstrumentId
+from stubs.model.identifiers import PositionId
+from stubs.model.identifiers import StrategyId
+from stubs.model.objects import Price
+from stubs.model.objects import Quantity
+from stubs.model.orders.base import Order
+from stubs.portfolio.base import PortfolioFacade
+
+class OrderEmulator(Actor):
+
+    debug: bool
+    command_count: int
+    event_count: int
+
+    _manager: OrderManager
+    _matching_cores: dict[InstrumentId, MatchingCore]
+    _subscribed_quotes: set[InstrumentId]
+    _subscribed_trades: set[InstrumentId]
+    _subscribed_strategies: set[StrategyId]
+    _monitored_positions: set[PositionId]
+
+    def __init__(
+        self,
+        portfolio: PortfolioFacade,
+        msgbus: MessageBus,
+        cache: Cache,
+        clock: Clock,
+        config: OrderEmulatorConfig | None = None,
+    ) -> None: ...
+    @property
+    def subscribed_quotes(self) -> list[InstrumentId]: ...
+    @property
+    def subscribed_trades(self) -> list[InstrumentId]: ...
+    def get_submit_order_commands(self) -> dict[ClientOrderId, SubmitOrder]: ...
+    def get_matching_core(self, instrument_id: InstrumentId) -> MatchingCore | None: ...
+    def on_start(self) -> None: ...
+    def on_event(self, event: Event) -> None: ...
+    def on_stop(self) -> None: ...
+    def on_reset(self) -> None: ...
+    def on_dispose(self) -> None: ...
+    def execute(self, command: TradingCommand) -> None: ...
+    def create_matching_core(
+        self,
+        instrument_id: InstrumentId,
+        price_increment: Price,
+    ) -> MatchingCore: ...
+    def on_order_book_deltas(self, deltas) -> None: ...
+    def on_quote_tick(self, tick: QuoteTick) -> None: ...
+    def on_trade_tick(self, tick: TradeTick) -> None: ...
+    def _check_monitoring(self, strategy_id: StrategyId, position_id: PositionId) -> None: ...
+    def _cancel_order(self, order: Order) -> None: ...
+    def _update_order(self, order: Order, new_quantity: Quantity) -> None: ...
+    def _trigger_stop_order(self, order: Order) -> None: ...
+    def _fill_market_order(self, order: Order) -> None: ...
+    def _fill_limit_order(self, order: Order) -> None: ...
+
