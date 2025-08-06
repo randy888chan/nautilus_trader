@@ -8,6 +8,8 @@ Released on TBD (UTC).
 - Added `MarginModel` concept, base models, config, and factory for backtesting (#2794), thanks @faysou and @stefansimik
 - Added additional built-in backtest fill models (#2795), thanks @faysou and @stefansimik
 - Added `OrderBookDepth10DataWrangler` (#2801), thanks @trylovetom
+- Added Bybit options support (#2821), thanks @Baerenstein
+- Added Bybit `is_leverage` order parameter support
 - Added `persist_account_events` config option for `CacheConfig` (default `True` to retain current behavior)
 - Added `query_account` method for `Strategy`
 - Added `QueryAccount` execution message
@@ -31,6 +33,7 @@ Released on TBD (UTC).
 - Reverted implementation of `delete_account_event` from cache database that was too inefficient and is now a no-op pending redesign
 - Renamed `ParquetDataCatalog.reset_catalog_file_names` to `reset_all_file_names`
 - Removed the generic `cvec_drop` FFI function, as it was unused and prone to misuse, potentially causing memory leaks
+- Consolidated `OwnBook` `group_bids` and `group_asks` methods into `bid_quantity` and `ask_quantity` with optional `depth` and `group_size` parameters
 - Simplified Binance environment variables for API credentials: removed separate variables for RSA/Ed25519 keys and consolidated mainnet spot/futures credentials
 
 ### Internal Improvements
