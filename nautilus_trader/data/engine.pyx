@@ -1566,15 +1566,17 @@ cdef class DataEngine(Component):
         # We assume each symbol is only in one catalog
         for catalog in self._catalogs.values():
             if isinstance(request, RequestInstruments):
+                # We only use ts_end if end is passed as request argument
                 data += catalog.instruments(
                     start=ts_start,
-                    end=ts_end,
+                    end=(ts_end if end is not None else None),
                 )
             elif isinstance(request, RequestInstrument):
+                # We only use ts_end if end is passed as request argument
                 data = catalog.instruments(
                     instrument_ids=[str(request.instrument_id)],
                     start=ts_start,
-                    end=ts_end,
+                    end=(ts_end if end is not None else None),
                 )
             elif isinstance(request, RequestQuoteTicks):
                 data = catalog.quote_ticks(
@@ -1620,23 +1622,26 @@ cdef class DataEngine(Component):
                 f"data[-1].ts_init={data[-1].ts_init}, {ts_now=}",
             )
 
-        if isinstance(request, RequestInstruments) and request.start is not None:
-            # Filtering last available instrument by instrument_id
-            last_instrument = {}
-            for instrument in data:
-                if instrument.id not in last_instrument:
-                    last_instrument[instrument.id] = instrument
-                elif instrument.ts_init > last_instrument[instrument.id].ts_init:
-                    last_instrument[instrument.id] = instrument
-
-            data = list(last_instrument.values())
-        elif isinstance(request, RequestInstrument):
+        if isinstance(request, RequestInstrument):
             if len(data) == 0:
                 self._log.error(f"Cannot find instrument for {request.instrument_id}")
                 return
 
-            # Input instruments are sorted by ts_init
             data = data[-1]
+        elif isinstance(request, RequestInstruments):
+            only_last = request.params.get("only_last", True)
+
+            if only_last:
+                # Retains only the latest instrument record per instrument_id, based on the most recent ts_init
+                last_instrument = {}
+
+                for instrument in data:
+                    if instrument.id not in last_instrument:
+                        last_instrument[instrument.id] = instrument
+                    elif instrument.ts_init > last_instrument[instrument.id].ts_init:
+                        last_instrument[instrument.id] = instrument
+
+                data = list(last_instrument.values())
 
         params = request.params.copy()
         params["update_catalog"] = False
@@ -1941,8 +1946,8 @@ cdef class DataEngine(Component):
 
         if correlation_id not in self._query_group_n_responses or self._query_group_n_responses[correlation_id] == 1:
             self._check_bounds(response)
-            start = response.start.value
-            end = response.end.value
+            start = response.start.value if response.start is not None else None
+            end = response.end.value if response.end is not None else None
             identifier = response.params.get("identifier")
             update_catalog = response.params.get("update_catalog", False)
 
@@ -1975,8 +1980,8 @@ cdef class DataEngine(Component):
             update_catalog = response.params.get("update_catalog", False)
 
             if update_catalog:
-                start = response.start.value
-                end = response.end.value
+                start = response.start.value if response.start is not None else None
+                end = response.end.value if response.end is not None else None
                 identifier = response.params.get("identifier")
                 self._update_catalog(
                     response.data,
@@ -2001,8 +2006,8 @@ cdef class DataEngine(Component):
         if data_len == 0:
             return
 
-        cdef uint64_t start = response.start.value
-        cdef uint64_t end = response.end.value
+        cdef uint64_t start = response.start.value if response.start is not None else 0
+        cdef uint64_t end = response.end.value if response.end is not None else 0
         cdef int first_index = 0
         cdef int last_index = data_len - 1
 
@@ -2023,7 +2028,7 @@ cdef class DataEngine(Component):
 
     def _update_catalog(
         self,
-        ticks: list,
+        data: list,
         data_cls: type,
         identifier: object,
         start: int | None = None,
@@ -2043,11 +2048,11 @@ cdef class DataEngine(Component):
             used_catalog = list(self._catalogs.values())[0]
 
         if used_catalog is not None:
-            if len(ticks) == 0 and data_cls and start and end:
+            if len(data) == 0 and data_cls and start and end:
                 # identifier can be None for custom data
                 used_catalog.extend_file_name(data_cls, identifier, start, end)
             else:
-                used_catalog.write_data(ticks, start, end)
+                used_catalog.write_data(data, start, end)
         else:
             self._log.warning("No catalog available for appending data.")
 

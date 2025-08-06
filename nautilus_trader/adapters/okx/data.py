@@ -197,7 +197,8 @@ class OKXDataClient(LiveMarketDataClient):
                 LogColor.BLUE,
             )
 
-        # Cancel all client futures
+        # Cancel and await all outstanding client futures so any pending
+        # exceptions are surfaced and the event loop can cleanly shut down.
         for future in self._ws_client_futures:
             if not future.done():
                 future.cancel()
@@ -205,6 +206,13 @@ class OKXDataClient(LiveMarketDataClient):
         for future in self._ws_business_client_futures:
             if not future.done():
                 future.cancel()
+
+        if self._ws_client_futures or self._ws_business_client_futures:
+            await asyncio.gather(
+                *self._ws_client_futures,
+                *self._ws_business_client_futures,
+                return_exceptions=True,
+            )
 
     def _cache_instruments(self) -> None:
         # Ensures instrument definitions are available for correct
@@ -384,7 +392,6 @@ class OKXDataClient(LiveMarketDataClient):
 
         pyo3_bar_type = nautilus_pyo3.BarType.from_str(str(request.bar_type))
 
-        # Forward exact parameters to Rust layer (PY-2)
         pyo3_bars = await self._http_client.request_bars(
             bar_type=pyo3_bar_type,
             start=ensure_pydatetime_utc(request.start),
@@ -393,7 +400,6 @@ class OKXDataClient(LiveMarketDataClient):
         )
         bars = Bar.from_pyo3_list(pyo3_bars)
 
-        # Log summary (PY-4)
         now = self._clock.utc_now()
         chosen_endpoint = (
             "history" if request.start and (now - request.start).days > 100 else "regular"
@@ -423,7 +429,7 @@ class OKXDataClient(LiveMarketDataClient):
             if nautilus_pyo3.is_pycapsule(msg):
                 # The capsule will fall out of scope at the end of this method,
                 # and eventually be garbage collected. The contained pointer
-                # to `Data` is still owned and managed by Rust
+                # to `Data` is still owned and managed by Rust.
                 data = capsule_to_data(msg)
                 self._handle_data(data)
             else:

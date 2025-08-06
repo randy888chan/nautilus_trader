@@ -202,10 +202,13 @@ class OKXExecutionClient(LiveExecutionClient):
                 await close_result
             self._log.info(f"Disconnected from {self._ws_client.url}", LogColor.BLUE)
 
-        # Cancel all client futures
+        # Cancel and await any outstanding client futures so the loop cleans up
         for future in self._ws_client_futures:
             if not future.done():
                 future.cancel()
+
+        if self._ws_client_futures:
+            await asyncio.gather(*self._ws_client_futures, return_exceptions=True)
 
     async def _cache_instruments(self) -> None:
         # Ensures instrument definitions are available for correct
@@ -593,7 +596,7 @@ class OKXExecutionClient(LiveExecutionClient):
             trigger_price=pyo3_trigger_price,
             post_only=order.is_post_only,
             reduce_only=order.is_reduce_only,
-            position_side=None,  # Will be determined by the Rust client
+            quote_quantity=order.is_quote_quantity,
         )
 
     # -- WEBSOCKET HANDLERS -----------------------------------------------------------------------

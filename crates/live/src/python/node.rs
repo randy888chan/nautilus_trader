@@ -18,12 +18,21 @@
 use std::{cell::RefCell, rc::Rc};
 
 use nautilus_common::{
-    actor::data_actor::ImportableActorConfig, enums::Environment, python::actor::PyDataActor,
+    actor::data_actor::{DataActorConfig, ImportableActorConfig},
+    component::{Component, register_component_actor_by_ref},
+    enums::Environment,
+    python::actor::PyDataActor,
+    runtime::get_runtime,
 };
-use nautilus_core::UUID4;
-use nautilus_model::identifiers::{ActorId, TraderId};
+use nautilus_core::{UUID4, python::to_pyruntime_err};
+use nautilus_model::identifiers::TraderId;
 use nautilus_system::get_global_pyo3_registry;
-use pyo3::prelude::*;
+use pyo3::{
+    exceptions::{PyRuntimeError, PyValueError},
+    prelude::*,
+    types::{PyDict, PyTuple},
+};
+use serde_json;
 
 use crate::node::{LiveNode, LiveNodeBuilder};
 
@@ -41,9 +50,7 @@ impl LiveNode {
             Ok(builder) => Ok(LiveNodeBuilderPy {
                 inner: Rc::new(RefCell::new(Some(builder))),
             }),
-            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                e.to_string(),
-            )),
+            Err(e) => Err(PyErr::new::<PyRuntimeError, _>(e.to_string())),
         }
     }
 
@@ -78,29 +85,21 @@ impl LiveNode {
     #[pyo3(name = "start")]
     fn py_start(&mut self) -> PyResult<()> {
         if self.is_running() {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "LiveNode is already running",
-            ));
+            return Err(PyRuntimeError::new_err("LiveNode is already running"));
         }
 
         // Non-blocking start - just start the node in the background
-        let rt = tokio::runtime::Runtime::new().map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create runtime: {e}"))
-        })?;
-
-        rt.block_on(async {
+        get_runtime().block_on(async {
             self.start()
                 .await
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))
         })
     }
 
     #[pyo3(name = "run")]
     fn py_run(&mut self, py: Python) -> PyResult<()> {
         if self.is_running() {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "LiveNode is already running",
-            ));
+            return Err(PyRuntimeError::new_err("LiveNode is already running"));
         }
 
         // Get a handle for coordinating with the signal checker
@@ -117,8 +116,8 @@ impl LiveNode {
             py,
             None,
             None,
-            move |_args: &pyo3::Bound<'_, pyo3::types::PyTuple>,
-                  _kwargs: Option<&pyo3::Bound<'_, pyo3::types::PyDict>>|
+            move |_args: &pyo3::Bound<'_, PyTuple>,
+                  _kwargs: Option<&pyo3::Bound<'_, PyDict>>|
                   -> PyResult<()> {
                 log::info!("Python signal handler called");
                 handle_for_signal.stop();
@@ -131,14 +130,10 @@ impl LiveNode {
 
         // Run the node and restore signal handler afterward
         let result = {
-            let rt = tokio::runtime::Runtime::new().map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create runtime: {e}"))
-            })?;
-
-            rt.block_on(async {
+            get_runtime().block_on(async {
                 self.run()
                     .await
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                    .map_err(|e| PyRuntimeError::new_err(e.to_string()))
             })
         };
 
@@ -151,9 +146,7 @@ impl LiveNode {
     #[pyo3(name = "stop")]
     fn py_stop(&self) -> PyResult<()> {
         if !self.is_running() {
-            return Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "LiveNode is not running",
-            ));
+            return Err(PyRuntimeError::new_err("LiveNode is not running"));
         }
 
         // Use the handle to signal stop - this is thread-safe and doesn't require async
@@ -161,18 +154,19 @@ impl LiveNode {
         Ok(())
     }
 
+    #[allow(unsafe_code)] // Required for Python actor component registration
     #[pyo3(name = "add_actor_from_config")]
     fn py_add_actor_from_config(
         &mut self,
         _py: Python,
         config: ImportableActorConfig,
     ) -> PyResult<()> {
-        log::info!("Starting add_actor_from_config with: {config:?}");
+        log::debug!("`add_actor_from_config` with: {config:?}");
 
         // Extract module and class name from actor_path
         let parts: Vec<&str> = config.actor_path.split(':').collect();
         if parts.len() != 2 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
+            return Err(PyValueError::new_err(
                 "actor_path must be in format 'module.path:ClassName'",
             ));
         }
@@ -186,55 +180,196 @@ impl LiveNode {
             let actor_class = actor_module.getattr(class_name)?;
             Ok(actor_class.unbind())
         })
-        .map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to import Python class: {e}"))
-        })?;
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to import Python class: {e}")))?;
 
-        // TODO: Convert config HashMap to DataActorConfig directly for now
-        let mut actor_id = None;
-        let mut log_events = true;
-        let mut log_commands = true;
+        // TODO: Create default DataActorConfig for Rust PyDataActor,
+        // the Python class will handle its own configuration for now
+        let basic_data_actor_config = DataActorConfig::default();
 
-        for (key, value) in &config.config {
-            match key.as_str() {
-                "actor_id" => {
-                    actor_id = Some(ActorId::from(value.as_str()));
+        log::debug!("Created basic DataActorConfig for Rust: {basic_data_actor_config:?}");
+
+        // Create the Python actor and register the internal PyDataActor
+        let python_actor = Python::with_gil(|py| -> anyhow::Result<PyObject> {
+            // Import the Python class
+            let actor_module = py
+                .import(module_name)
+                .map_err(|e| anyhow::anyhow!("Failed to import module {module_name}: {e}"))?;
+            let actor_class = actor_module
+                .getattr(class_name)
+                .map_err(|e| anyhow::anyhow!("Failed to get class {class_name}: {e}"))?;
+
+            // Create config instance if config_path and config are provided
+            let config_instance = if !config.config_path.is_empty() && !config.config.is_empty() {
+                // Parse the config_path to get module and class
+                let config_parts: Vec<&str> = config.config_path.split(':').collect();
+                if config_parts.len() != 2 {
+                    anyhow::bail!(
+                        "config_path must be in format 'module.path:ClassName', was {}",
+                        config.config_path
+                    );
                 }
-                "log_events" => {
-                    log_events = value.parse::<bool>().unwrap_or(true);
+                let (config_module_name, config_class_name) = (config_parts[0], config_parts[1]);
+
+                log::debug!("Importing config class from module: {config_module_name} class: {config_class_name}");
+
+                // Import the config class
+                let config_module = py
+                    .import(config_module_name)
+                    .map_err(|e| anyhow::anyhow!("Failed to import config module {config_module_name}: {e}"))?;
+                let config_class = config_module
+                    .getattr(config_class_name)
+                    .map_err(|e| anyhow::anyhow!("Failed to get config class {config_class_name}: {e}"))?;
+
+                // Convert the serde_json::Value config dict to a Python dict
+                let py_dict = PyDict::new(py);
+                for (key, value) in &config.config {
+                    // Convert serde_json::Value back to Python object via JSON
+                    let json_str = serde_json::to_string(value)
+                        .map_err(|e| anyhow::anyhow!("Failed to serialize config value: {e}"))?;
+                    let py_value = PyModule::import(py, "json")?
+                        .call_method("loads", (json_str,), None)?;
+                    py_dict.set_item(key, py_value)?;
                 }
-                "log_commands" => {
-                    log_commands = value.parse::<bool>().unwrap_or(true);
+
+                log::debug!("Created config dict: {py_dict:?}");
+
+                // Try multiple approaches to create the config instance
+                let config_instance = {
+                    // First, try calling the config class with **kwargs (this works if the dataclass handles string conversion)
+                    match config_class.call((), Some(&py_dict)) {
+                        Ok(instance) => {
+                            log::debug!("Successfully created config instance with kwargs");
+
+                            // Manually call __post_init__ if it exists
+                            if let Err(e) = instance.call_method0("__post_init__") {
+                                log::warn!("Failed to call __post_init__ on config instance: {e}");
+                            } else {
+                                log::debug!("Successfully called __post_init__ on config instance");
+                            }
+
+                            instance
+                        },
+                        Err(kwargs_err) => {
+                            log::debug!("Failed to create config with kwargs: {kwargs_err}");
+
+                            // Second approach: try to create with default constructor and set attributes
+                            match config_class.call0() {
+                                Ok(instance) => {
+                                    log::debug!("Created default config instance, setting attributes");
+                                    for (key, value) in &config.config {
+                                        // Convert serde_json::Value to Python object
+                                        let json_str = serde_json::to_string(value)
+                                            .map_err(|e| anyhow::anyhow!("Failed to serialize config value: {e}"))?;
+                                        let py_value = PyModule::import(py, "json")?
+                                            .call_method("loads", (json_str,), None)?;
+                                        if let Err(setattr_err) = instance.setattr(key, py_value) {
+                                            log::warn!("Failed to set attribute {key}: {setattr_err}");
+                                        }
+                                    }
+
+                                    // Manually call __post_init__ if it exists
+                                    if let Err(e) = instance.call_method0("__post_init__") {
+                                        log::warn!("Failed to call __post_init__ on config instance: {e}");
+                                    } else {
+                                        log::debug!("Successfully called __post_init__ on config instance");
+                                    }
+
+                                    instance
+                                },
+                                Err(default_err) => {
+                                    log::debug!("Failed to create default config: {default_err}");
+
+                                    // If both approaches fail, return the original error
+                                    anyhow::bail!(
+                                        "Failed to create config instance. Tried kwargs approach: {kwargs_err}, default constructor: {default_err}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                };
+
+                log::debug!("Created config instance: {config_instance:?}");
+
+                Some(config_instance)
+            } else {
+                log::debug!("No config_path or empty config, using None");
+                None
+            };
+
+            // Create the Python actor instance with the config
+            let python_actor = if let Some(config_obj) = config_instance {
+                actor_class.call1((config_obj,))?
+            } else {
+                actor_class.call0()?
+            };
+
+            log::debug!("Created Python actor instance: {python_actor:?}");
+
+            // Get a mutable reference to the internal PyDataActor for registration
+            let mut py_data_actor_ref = python_actor.extract::<PyRefMut<PyDataActor>>()?;
+
+            log::debug!(
+                "Internal PyDataActor mem_addr: {}, registered: {}",
+                &py_data_actor_ref.mem_address(),
+                py_data_actor_ref.is_registered()
+            );
+
+            // Set the Python instance reference for method dispatch on the original
+            py_data_actor_ref.set_python_instance(python_actor.clone().unbind());
+
+            log::debug!("Set Python instance reference for method dispatch");
+
+            // Register the internal PyDataActor
+            let trader_id = self.trader_id();
+            let clock = self.kernel().clock();
+            let cache = self.kernel().cache();
+
+            py_data_actor_ref
+                .register(trader_id, clock, cache)
+                .map_err(|e| anyhow::anyhow!("Failed to register PyDataActor: {e}"))?;
+
+            log::debug!(
+                "Internal PyDataActor registered: {}, state: {:?}",
+                py_data_actor_ref.is_registered(),
+                py_data_actor_ref.state()
+            );
+
+            Ok(python_actor.unbind())
+        })
+        .map_err(to_pyruntime_err)?;
+
+        // Add the actor to the trader's lifecycle management without consuming it
+        let actor_id = Python::with_gil(
+            |py| -> anyhow::Result<nautilus_model::identifiers::ActorId> {
+                let py_actor = python_actor.bind(py);
+                let py_data_actor_ref = py_actor
+                    .downcast::<PyDataActor>()
+                    .map_err(|e| anyhow::anyhow!("Failed to downcast to PyDataActor: {e}"))?;
+                let py_data_actor = py_data_actor_ref.borrow();
+
+                // Register the component in the global registry using the unsafe method
+                // SAFETY: The Python instance will remain alive, keeping the PyDataActor valid
+                unsafe {
+                    register_component_actor_by_ref(&*py_data_actor);
                 }
-                _ => {
-                    log::warn!("Unknown config key '{key}' ignored");
-                }
-            }
-        }
 
-        // Create DataActorConfig directly in Rust
-        let data_actor_config = nautilus_common::actor::data_actor::DataActorConfig {
-            actor_id,
-            log_events,
-            log_commands,
-        };
+                Ok(py_data_actor.actor_id())
+            },
+        )
+        .map_err(to_pyruntime_err)?;
 
-        log::info!("Created Rust DataActorConfig: {data_actor_config:?}");
+        // TODO: Add the actor ID to the trader for lifecycle management; clean up approach
+        self.kernel_mut()
+            .trader
+            .add_actor_id_for_lifecycle(actor_id)
+            .map_err(to_pyruntime_err)?;
 
-        // Create a factory closure that will be called by the registration system
-        let actor_factory = move || -> anyhow::Result<PyDataActor> {
-            // For now, create a basic PyDataActor directly to get the registration working
-            // TODO: Add Python method dispatch integration in a separate step
-            let actor = PyDataActor::new(Some(data_actor_config));
-            log::info!("Created PyDataActor directly in factory (method dispatch TODO)");
-            Ok(actor)
-        };
+        // Store the Python actor reference to prevent garbage collection
+        // TODO: Add to a proper LiveNode registry for Python actors
+        std::mem::forget(python_actor); // Prevent dropping - we'll manage lifecycle manually
 
-        // Use the factory-based registration approach
-        self.add_actor_from_factory(actor_factory)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-
-        log::info!("Registered actor from factory");
+        log::info!("Registered Python actor {actor_id}");
         Ok(())
     }
 

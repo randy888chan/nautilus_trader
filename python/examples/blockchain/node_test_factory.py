@@ -24,18 +24,19 @@ def test_factory_approach():
     """
     Test creating and adding actors using factory approach.
     """
-    # Create LiveNode
     trader_id = TraderId("TESTER-001")
     node = LiveNode.builder("test_factory", trader_id, Environment.SANDBOX).build()
 
-    # Create ImportableActorConfig for BlockchainActor
     actor_config = ImportableActorConfig(
-        actor_path="actors:BlockchainActor",  # Import from local actors.py
-        config_path="nautilus_trader.common:DataActorConfig",  # Not used yet, but required field
+        actor_path="actors:BlockchainActor",
+        config_path="actors:BlockchainActorConfig",
         config={
             "actor_id": "BLOCKCHAIN-001",
-            "log_events": "true",
-            "log_commands": "true",
+            "log_events": True,
+            "log_commands": True,
+            "chain": "Arbitrum",
+            "client_id": "BLOCKCHAIN-Arbitrum",
+            "pools": ["WETH/USDC-3000.Arbitrum:UniswapV3"],
         },
     )
 

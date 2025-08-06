@@ -7,7 +7,7 @@ the FFI boundary **by value**.
 
 The rules below are *strict*; violating them results in undefined behaviour (usually a double-free or a memory leak).
 
-## CVec lifecycle at a glance
+## CVec lifecycle
 
 | Step  | Owner                         | Action |
 |-------|-------------------------------|--------|
@@ -28,9 +28,87 @@ destructor** (`capsule_destructor` or `capsule_destructor_deltas`) that frees bo
 and the `CVec`. Callers must therefore *not* free the memory manually – doing so would double
 free.
 
-### Why there is no generic `cvec_drop` anymore
+## Capsules created on the Rust side *(PyO3 bindings)*
+
+When Rust code pushes a heap-allocated value into Python it **must** use
+`PyCapsule::new_with_destructor` so that Python knows how to free the allocation
+once the capsule becomes unreachable.  The closure/destructor is responsible
+for reconstructing the original `Box<T>` or `Vec<T>` and letting it drop.
+
+```rust
+Python::with_gil(|py| {
+    // allocate the value on the heap
+    let my_data = MyStruct::new();
+
+    // move it into the capsule and register a destructor
+    let capsule = pyo3::types::PyCapsule::new_with_destructor(py, my_data, None, |_, _| {})
+        .expect("capsule creation failed");
+
+    // ... pass `capsule` back to Python ...
+});
+```
+
+Do **not** use `PyCapsule::new(…, None)`; that variant registers *no* destructor
+and will leak memory unless the recipient manually extracts and frees the
+pointer (something we never rely on).  The codebase has been updated to follow
+this rule everywhere – adding new FFI modules must follow the same pattern.
+
+## Why there is no generic `cvec_drop` anymore
 
 Earlier versions of the codebase shipped a generic `cvec_drop` function that always treated the
 buffer as `Vec<u8>`. Using it with any other element type causes a size-mismatch during
 deallocation and corrupts the allocator’s bookkeeping. Because the helper was not referenced
 anywhere inside the project it has been removed to avoid accidental misuse.
+
+## Box-backed `*_API` wrappers (owned Rust objects)
+
+When the Rust core needs to hand a *complex* value (for example an
+`OrderBook`, `SyntheticInstrument`, or `TimeEventAccumulator`) to foreign
+code it allocates the value on the heap with `Box::new` and returns a
+small `repr(C)` wrapper whose only field is that `Box`.
+
+```rust
+#[repr(C)]
+pub struct OrderBook_API(Box<OrderBook>);
+
+#[unsafe(no_mangle)]
+pub extern "C" fn orderbook_new(id: InstrumentId, book_type: BookType) -> OrderBook_API {
+    OrderBook_API(Box::new(OrderBook::new(id, book_type)))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn orderbook_drop(book: OrderBook_API) {
+    drop(book); // frees the heap allocation
+}
+```
+
+Memory-safety requirements are therefore:
+
+1.  Every constructor (`*_new`) **must** have a matching `*_drop` exported
+    next to it.
+2.  The *Python/Cython* binding must guarantee that `*_drop` is invoked
+    exactly once.  Two approaches are accepted:
+
+    • Wrap the pointer in a `PyCapsule` created with
+      `PyCapsule::new_with_destructor`, passing a destructor that calls
+      the drop helper.
+
+    • Call the helper explicitly in `__del__`/`__dealloc__` on the Python
+      side.  This is the historical pattern for most v1 Cython modules:
+
+      ```cython
+      cdef class OrderBook:
+          cdef OrderBook_API _mem
+
+          def __cinit__(self, ...):
+              self._mem = orderbook_new(...)
+
+          def __dealloc__(self):
+              if self._mem._0 != NULL:
+                  orderbook_drop(self._mem)
+      ```
+
+Whichever style is used, remember: **forgetting the drop call leaks the
+entire structure**, while calling it twice will double-free and crash.
+
+New FFI code must follow this template before it can be merged.

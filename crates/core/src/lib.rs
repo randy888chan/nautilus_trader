@@ -46,6 +46,7 @@
 //!
 //! - `ffi`: Enables the C foreign function interface (FFI) from [cbindgen](https://github.com/mozilla/cbindgen).
 //! - `python`: Enables Python bindings from [PyO3](https://pyo3.rs).
+//! - `extension-module`: Builds the crate as a Python extension module.
 
 #![warn(rustc::all)]
 #![deny(unsafe_code)]
@@ -59,13 +60,16 @@ pub mod collections;
 pub mod consts;
 pub mod correctness;
 pub mod datetime;
+pub mod drop;
 pub mod env;
 pub mod math;
 pub mod message;
 pub mod nanos;
+
 pub mod parsing;
 pub mod paths;
 pub mod serialization;
+pub mod shared;
 pub mod time;
 pub mod uuid;
 
@@ -79,4 +83,10 @@ pub mod python;
 compile_error!("Unsupported platform: Nautilus supports only Linux, macOS, and Windows");
 
 // Re-exports
-pub use crate::{nanos::UnixNanos, time::AtomicTime, uuid::UUID4};
+pub use crate::{
+    drop::CleanDrop,
+    nanos::UnixNanos,
+    shared::{SharedCell, WeakCell},
+    time::AtomicTime,
+    uuid::UUID4,
+};

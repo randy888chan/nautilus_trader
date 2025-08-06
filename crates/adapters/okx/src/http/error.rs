@@ -13,18 +13,42 @@
 //  limitations under the License.
 // -------------------------------------------------------------------------------------------------
 
-//! Defines the error structures and enumerations for the OKX integration.
+//! Error structures and enumerations for the OKX integration.
 //!
-//! This module includes data types for deserializing exchange errors from OKX
-//! (`OKXErrorResponse`, `OKXErrorMessage`), as well as a higher-level typed
-//! error enum (`OKXHttpError`) that represents the various failure states in
-//! the client (e.g., missing credentials, network errors, unexpected status
-//! codes, etc.).
+//! The JSON error schema is described in the OKX documentation under
+//! *REST API > Error Codes* – <https://www.okx.com/docs-v5/en/#error-codes>.
+//! The types below mirror that structure and are reused across the entire
+//! crate.
 
 use nautilus_network::http::HttpClientError;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use thiserror::Error;
+
+/// Build error for query parameter validation.
+#[derive(Debug, Error)]
+pub enum BuildError {
+    /// Missing required instrument ID.
+    #[error("Missing required instrument ID")]
+    MissingInstId,
+    /// Missing required bar interval.
+    #[error("Missing required bar interval")]
+    MissingBar,
+    /// Both after and before cursors specified.
+    #[error("Cannot specify both 'after' and 'before' cursors")]
+    BothCursors,
+    /// Invalid time range: after_ms should be greater than before_ms.
+    #[error(
+        "Invalid time range: after_ms ({after_ms}) must be greater than before_ms ({before_ms})"
+    )]
+    InvalidTimeRange { after_ms: i64, before_ms: i64 },
+    /// Cursor timestamp is in nanoseconds (> 13 digits).
+    #[error("Cursor timestamp appears to be in nanoseconds (> 13 digits)")]
+    CursorIsNanoseconds,
+    /// Limit exceeds maximum allowed value.
+    #[error("Limit exceeds maximum of 300")]
+    LimitTooHigh,
+}
 
 /// Represents the JSON structure of an error response returned by the OKX API.
 #[derive(Clone, Debug, Deserialize)]
@@ -54,10 +78,27 @@ pub enum OKXHttpError {
     /// Failure during JSON serialization/deserialization.
     #[error("JSON error: {0}")]
     JsonError(String),
+    /// Parameter validation error.
+    #[error("Parameter validation error: {0}")]
+    ValidationError(String),
     /// Wrapping the underlying HttpClientError from the network crate.
     #[error("Network error: {0}")]
     HttpClientError(#[from] HttpClientError),
     /// Any unknown HTTP status or unexpected response from OKX.
     #[error("Unexpected HTTP status code {status}: {body}")]
     UnexpectedStatus { status: StatusCode, body: String },
+}
+
+impl From<String> for OKXHttpError {
+    fn from(error: String) -> Self {
+        OKXHttpError::ValidationError(error)
+    }
+}
+
+// Allow use of the `?` operator on `serde_json` results inside the HTTP
+// client implementation by converting them into our typed error.
+impl From<serde_json::Error> for OKXHttpError {
+    fn from(error: serde_json::Error) -> Self {
+        OKXHttpError::JsonError(error.to_string())
+    }
 }
