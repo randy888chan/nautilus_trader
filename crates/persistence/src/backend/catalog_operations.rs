@@ -1189,10 +1189,10 @@ impl ParquetDataCatalog {
     /// let catalog = ParquetDataCatalog::new(/* ... */);
     ///
     /// // Reset all filenames in the catalog
-    /// catalog.reset_catalog_file_names()?;
+    /// catalog.reset_all_file_names()?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
-    pub fn reset_catalog_file_names(&self) -> Result<()> {
+    pub fn reset_all_file_names(&self) -> Result<()> {
         let leaf_directories = self.find_leaf_data_directories()?;
 
         for directory in leaf_directories {
@@ -1626,6 +1626,9 @@ impl ParquetDataCatalog {
         let mut files_to_remove = std::collections::HashSet::new();
 
         for operation in operations_to_execute {
+            // Reset the session before each operation to ensure fresh data is loaded
+            // This clears any cached table registrations that might interfere with file operations
+            self.reset_session();
             match operation.operation_type.as_str() {
                 "split_before" => {
                     // Query data before the deletion range and write it

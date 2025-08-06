@@ -13,8 +13,9 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 # -------------------------------------------------------------------------------------------------
+
 """
-DYdX Cross-Rollup Market Maker Strategy.
+dYdX Cross-Rollup Market Maker Strategy
 
 This strategy leverages dYdX v4's unique cross-rollup capabilities to provide liquidity
 across multiple rollup chains and capture arbitrage opportunities between chains.
@@ -32,29 +33,45 @@ while managing cross-chain position risk and optimizing for chain-specific condi
 
 """
 
-import asyncio
-from decimal import Decimal
-from typing import Any
-
-from nautilus_trader.model.identifiers import InstrumentId
-from nautilus_trader.trading.strategy import Strategy
-
-
 # *** THIS IS A TEST STRATEGY WITH NO ALPHA ADVANTAGE WHATSOEVER. ***
 # *** IT IS NOT INTENDED TO BE USED TO TRADE LIVE WITH REAL MONEY. ***
 
+import asyncio
+import json
+import logging
+from decimal import Decimal
+from typing import Dict, List, Optional, Tuple
+
+import grpc
+from nautilus_trader.adapters.dydx import (
+    DYDXDataClientConfig,
+    DYDXExecClientConfig,
+    DYDXLiveDataClientFactory,
+    DYDXLiveExecClientFactory,
+)
+from nautilus_trader.cache.config import CacheConfig
+from nautilus_trader.config import (
+    InstrumentProviderConfig,
+    LiveExecEngineConfig,
+    LoggingConfig,
+    TradingNodeConfig,
+)
+from nautilus_trader.live.node import TradingNode
+from nautilus_trader.model.data import BarType
+from nautilus_trader.model.identifiers import InstrumentId, TraderId
+from nautilus_trader.trading.strategy import Strategy
+
+_LOG = logging.getLogger("DYDX-CROSS-ROLLUP-MM")
 ONE_BP = Decimal("0.0001")  # ⇢ basis point constant
 
 
 class CrossRollupMMConfig:
-    """
-    Configuration for cross-rollup market maker strategy.
-    """
+    """Configuration for cross-rollup market maker strategy."""
 
     def __init__(
         self,
-        target_chains: list[str],
-        instruments_per_chain: dict[str, list[InstrumentId]],
+        target_chains: List[str],
+        instruments_per_chain: Dict[str, List[InstrumentId]],
         base_spread_bps: int = 20,
         cross_chain_spread_bps: int = 50,
         max_position_per_chain: Decimal = Decimal("10000.0"),
@@ -95,33 +112,26 @@ class CrossRollupMarketMaker(Strategy):
 
     dYdX v4's cross-rollup architecture enables seamless asset movement
     and position synchronization across multiple chains.
-
     """
 
     def __init__(self, config: CrossRollupMMConfig):
         super().__init__(config)
         self.config = config
-        self.chain_connections: dict[str, dict[str, Any]] = {}
-        self.cross_chain_positions: dict[str, dict[str, Any]] = {}
-        self.bridge_queues: dict[str, list[dict[str, Any]]] = {}
-        self.gas_prices: dict[str, Decimal] = {}
-        self.ibc_channels: dict[str, dict[str, Any]] = {}  # ⇢ IBC channel mapping
-        self.pending_transfers: dict[str, dict[str, Any]] = {}  # ⇢ track pending IBC transfers
-        self.oracle_proofs: dict[str, dict[str, Any]] = {}  # ⇢ cached oracle proofs
-
-        # Track background tasks
-        self._tasks: list[asyncio.Task] = []
+        self.chain_connections = {}
+        self.cross_chain_positions = {}
+        self.bridge_queues = {}
+        self.gas_prices = {}
+        self.ibc_channels = {}  # ⇢ IBC channel mapping
+        self.pending_transfers = {}  # ⇢ track pending IBC transfers
+        self.oracle_proofs = {}  # ⇢ cached oracle proofs
 
     def on_start(self) -> None:
-        """
-        Initialize cross-rollup connections and market making.
-        """
+        """Initialize cross-rollup connections and market making."""
         self.log.info("Starting cross-rollup market maker strategy")
 
         # Initialize connections to all target chains
         for chain in self.config.target_chains:
-            task = asyncio.create_task(self._initialize_chain_connection(chain))
-            self._tasks.append(task)
+            asyncio.create_task(self._initialize_chain_connection(chain))
 
         # Subscribe to instruments across all chains
         for chain, instruments in self.config.instruments_per_chain.items():
@@ -143,32 +153,25 @@ class CrossRollupMarketMaker(Strategy):
         # ⇢ Start oracle proof refresh
         self.add_timer(120.0, self._refresh_oracle_proofs)
 
-        self.log.info(
-            f"Cross-rollup market maker initialized for {len(self.config.target_chains)} chains",
-        )
+        self.log.info(f"Cross-rollup market maker initialized for {len(self.config.target_chains)} chains")
 
     def on_stop(self) -> None:
-        """
-        Clean up cross-chain positions and connections.
-        """
+        """Clean up cross-chain positions and connections."""
         self.log.info("Stopping cross-rollup market maker strategy")
 
         # Close positions across all chains
         for chain in self.config.target_chains:
-            task = asyncio.create_task(self._close_chain_positions(chain))
-            self._tasks.append(task)
+            asyncio.create_task(self._close_chain_positions(chain))
 
         # ⇢ Schedule pending IBC transfers cleanup
-        task = asyncio.create_task(self._wait_for_pending_transfers())
-        self._tasks.append(task)
+        asyncio.create_task(self._wait_for_pending_transfers())
 
     async def _initialize_chain_connection(self, chain: str) -> None:
         """
         Initialize connection to a specific rollup chain.
 
-        dYdX v4's cross-rollup architecture uses Cosmos IBC for chain-to-chain
-        communication and asset transfers.
-
+        dYdX v4's cross-rollup architecture uses Cosmos IBC for
+        chain-to-chain communication and asset transfers.
         """
         try:
             # In a real implementation, this would establish gRPC connections
@@ -195,9 +198,8 @@ class CrossRollupMarketMaker(Strategy):
         """
         Monitor for cross-chain arbitrage opportunities.
 
-        This method compares prices across different rollup chains to identify
-        profitable arbitrage opportunities.
-
+        This method compares prices across different rollup chains
+        to identify profitable arbitrage opportunities.
         """
         try:
             # Get prices across all chains for each instrument
@@ -210,8 +212,7 @@ class CrossRollupMarketMaker(Strategy):
 
                     if price_data:
                         arb_opportunity = self._analyze_arbitrage_opportunity(
-                            instrument_id,
-                            price_data,
+                            instrument_id, price_data
                         )
 
                         if arb_opportunity:
@@ -224,13 +225,12 @@ class CrossRollupMarketMaker(Strategy):
         except Exception as e:
             self.log.error(f"Error monitoring cross-chain arbitrage: {e}")
 
-    async def _get_cross_chain_prices(self, instrument_id: InstrumentId) -> dict | None:
+    async def _get_cross_chain_prices(self, instrument_id: InstrumentId) -> Optional[Dict]:
         """
         Get prices for an instrument across all chains.
 
-        This method queries order books across multiple rollup chains to identify price
-        discrepancies.
-
+        This method queries order books across multiple rollup chains
+        to identify price discrepancies.
         """
         try:
             price_data = {}
@@ -254,17 +254,12 @@ class CrossRollupMarketMaker(Strategy):
             self.log.error(f"Error getting cross-chain prices for {instrument_id}: {e}")
             return None
 
-    def _analyze_arbitrage_opportunity(
-        self,
-        instrument_id: InstrumentId,
-        price_data: dict,
-    ) -> dict | None:
+    def _analyze_arbitrage_opportunity(self, instrument_id: InstrumentId, price_data: Dict) -> Optional[Dict]:
         """
         Analyze cross-chain arbitrage opportunity.
 
-        This method identifies profitable price discrepancies between chains and
-        calculates potential arbitrage profits.
-
+        This method identifies profitable price discrepancies between chains
+        and calculates potential arbitrage profits.
         """
         if len(price_data) < 2:
             return None
@@ -273,7 +268,7 @@ class CrossRollupMarketMaker(Strategy):
         best_bid_chain = None
         best_bid_price = Decimal(0)
         best_ask_chain = None
-        best_ask_price = Decimal("999999")
+        best_ask_price = Decimal('999999')
 
         for chain, prices in price_data.items():
             if prices["bid"] > best_bid_price:
@@ -303,13 +298,12 @@ class CrossRollupMarketMaker(Strategy):
 
         return None
 
-    async def _execute_cross_chain_arbitrage(self, opportunity: dict) -> None:
+    async def _execute_cross_chain_arbitrage(self, opportunity: Dict) -> None:
         """
         Execute cross-chain arbitrage opportunity.
 
-        This method executes simultaneous trades across different rollup chains to
-        capture arbitrage profits.
-
+        This method executes simultaneous trades across different rollup chains
+        to capture arbitrage profits.
         """
         instrument_id = opportunity["instrument_id"]
         buy_chain = opportunity["buy_chain"]
@@ -350,30 +344,23 @@ class CrossRollupMarketMaker(Strategy):
         self.log.info(
             f"Executed cross-chain arbitrage: {instrument_id} "
             f"Buy {buy_chain} @ {buy_price} / Sell {sell_chain} @ {sell_price} "
-            f"Size: {position_size} Profit: {opportunity['profit']:.4f}",
+            f"Size: {position_size} Profit: {opportunity['profit']:.4f}"
         )
 
-    def _calculate_arbitrage_size(self, opportunity: dict) -> Decimal:
+    def _calculate_arbitrage_size(self, opportunity: Dict) -> Decimal:
         """
         Calculate optimal position size for cross-chain arbitrage.
 
-        This method considers position limits, available capital, and chain-specific
-        constraints.
-
+        This method considers position limits, available capital,
+        and chain-specific constraints.
         """
         instrument_id = opportunity["instrument_id"]
         buy_chain = opportunity["buy_chain"]
         sell_chain = opportunity["sell_chain"]
 
         # Get current positions on both chains
-        buy_chain_position = self.cross_chain_positions.get(
-            f"{buy_chain}_{instrument_id}",
-            Decimal(0),
-        )
-        sell_chain_position = self.cross_chain_positions.get(
-            f"{sell_chain}_{instrument_id}",
-            Decimal(0),
-        )
+        buy_chain_position = self.cross_chain_positions.get(f"{buy_chain}_{instrument_id}", Decimal(0))
+        sell_chain_position = self.cross_chain_positions.get(f"{sell_chain}_{instrument_id}", Decimal(0))
 
         # Calculate available capacity
         buy_capacity = self.config.max_position_per_chain - abs(buy_chain_position)
@@ -392,9 +379,8 @@ class CrossRollupMarketMaker(Strategy):
         """
         Synchronize positions across all rollup chains.
 
-        This method ensures position data is consistent across chains and identifies any
-        position imbalances that need rebalancing.
-
+        This method ensures position data is consistent across chains
+        and identifies any position imbalances that need rebalancing.
         """
         try:
             # Get positions from all chains
@@ -411,10 +397,8 @@ class CrossRollupMarketMaker(Strategy):
         except Exception as e:
             self.log.error(f"Error syncing cross-chain positions: {e}")
 
-    async def _get_chain_positions(self, chain: str) -> dict[InstrumentId, Decimal]:
-        """
-        Get current positions on a specific chain.
-        """
+    async def _get_chain_positions(self, chain: str) -> Dict[InstrumentId, Decimal]:
+        """Get current positions on a specific chain."""
         try:
             # In a real implementation, this would query the specific chain's position data
             # via the chain's gRPC or REST API
@@ -436,9 +420,8 @@ class CrossRollupMarketMaker(Strategy):
         """
         Rebalance positions across chains to maintain target allocation.
 
-        This method uses IBC transfers to move assets between chains and maintain
-        optimal position distribution.
-
+        This method uses IBC transfers to move assets between chains
+        and maintain optimal position distribution.
         """
         # Calculate total position per instrument across all chains
         total_positions = {}
@@ -456,17 +439,12 @@ class CrossRollupMarketMaker(Strategy):
             if abs(total_position) > self.config.bridge_threshold:
                 await self._initiate_cross_chain_transfer(instrument_id, total_position)
 
-    async def _initiate_cross_chain_transfer(
-        self,
-        instrument_id: InstrumentId,
-        amount: Decimal,
-    ) -> None:
+    async def _initiate_cross_chain_transfer(self, instrument_id: InstrumentId, amount: Decimal) -> None:
         """
         Initiate cross-chain asset transfer using IBC.
 
-        This method uses dYdX v4's IBC integration to transfer assets between rollup
-        chains for position rebalancing.
-
+        This method uses dYdX v4's IBC integration to transfer assets
+        between rollup chains for position rebalancing.
         """
         # Find source and destination chains
         source_chain = None
@@ -496,16 +474,15 @@ class CrossRollupMarketMaker(Strategy):
 
             self.log.info(
                 f"Queued cross-chain transfer: {instrument_id} "
-                f"{transfer_amount} from {source_chain} to {dest_chain}",
+                f"{transfer_amount} from {source_chain} to {dest_chain}"
             )
 
     async def _monitor_gas_prices(self) -> None:
         """
         Monitor gas prices across all rollup chains.
 
-        This method tracks gas prices to optimize transaction timing and chain selection
-        for cost efficiency.
-
+        This method tracks gas prices to optimize transaction timing
+        and chain selection for cost efficiency.
         """
         try:
             for chain in self.config.target_chains:
@@ -518,16 +495,15 @@ class CrossRollupMarketMaker(Strategy):
             if self.gas_prices:
                 cheapest_chain = min(self.gas_prices, key=self.gas_prices.get)
                 self.log.debug(
-                    f"Gas prices: {dict(self.gas_prices)}, " f"Cheapest: {cheapest_chain}",
+                    f"Gas prices: {dict(self.gas_prices)}, "
+                    f"Cheapest: {cheapest_chain}"
                 )
 
         except Exception as e:
             self.log.error(f"Error monitoring gas prices: {e}")
 
-    async def _get_chain_gas_price(self, chain: str) -> Decimal | None:
-        """
-        Get current gas price for a specific chain.
-        """
+    async def _get_chain_gas_price(self, chain: str) -> Optional[Decimal]:
+        """Get current gas price for a specific chain."""
         try:
             # In a real implementation, this would query the chain's gas price
             # via the chain's gRPC or REST API
@@ -547,9 +523,7 @@ class CrossRollupMarketMaker(Strategy):
             return None
 
     async def _close_chain_positions(self, chain: str) -> None:
-        """
-        Close all positions on a specific chain.
-        """
+        """Close all positions on a specific chain."""
         if chain in self.config.instruments_per_chain:
             for instrument_id in self.config.instruments_per_chain[chain]:
                 position = self.cache.position(instrument_id)
@@ -563,9 +537,7 @@ class CrossRollupMarketMaker(Strategy):
                     self.submit_order(close_order)
 
     async def _wait_for_pending_transfers(self) -> None:
-        """
-        Wait for all pending IBC transfers to complete.
-        """
+        """Wait for all pending IBC transfers to complete."""
         try:
             # Check all bridge queues for pending transfers
             pending_transfers = []
@@ -581,14 +553,10 @@ class CrossRollupMarketMaker(Strategy):
                 timeout = 300  # 5 minutes
                 start_time = asyncio.get_event_loop().time()
 
-                while (
-                    pending_transfers and (asyncio.get_event_loop().time() - start_time) < timeout
-                ):
+                while pending_transfers and (asyncio.get_event_loop().time() - start_time) < timeout:
                     await asyncio.sleep(5)
                     # Check transfer status (placeholder - would check actual IBC transfer status)
-                    pending_transfers = [
-                        t for t in pending_transfers if t.get("status") == "pending"
-                    ]
+                    pending_transfers = [t for t in pending_transfers if t.get("status") == "pending"]
 
                 if pending_transfers:
                     self.log.warning(f"Timeout waiting for {len(pending_transfers)} IBC transfers")
@@ -602,9 +570,8 @@ class CrossRollupMarketMaker(Strategy):
         """
         Refresh oracle price proofs for all chains.
 
-        dYdX v4 uses oracle price proofs to ensure consistent pricing across all rollup
-        chains. This method refreshes those proofs.
-
+        dYdX v4 uses oracle price proofs to ensure consistent pricing
+        across all rollup chains. This method refreshes those proofs.
         """
         try:
             for chain in self.config.target_chains:
@@ -625,7 +592,7 @@ class CrossRollupMarketMaker(Strategy):
         except Exception as e:
             self.log.error(f"Error refreshing oracle proofs: {e}")
 
-    async def _validate_cross_chain_opportunity(self, opportunity: dict) -> bool:
+    async def _validate_cross_chain_opportunity(self, opportunity: Dict) -> bool:
         """
         Validate cross-chain arbitrage opportunity.
 
@@ -634,7 +601,6 @@ class CrossRollupMarketMaker(Strategy):
         - Position limits
         - Gas cost analysis
         - IBC transfer capacity
-
         """
         try:
             instrument_id = opportunity["instrument_id"]
@@ -663,15 +629,8 @@ class CrossRollupMarketMaker(Strategy):
             self.log.error(f"Error validating cross-chain opportunity: {e}")
             return False
 
-    async def _validate_oracle_prices(
-        self,
-        buy_chain: str,
-        sell_chain: str,
-        instrument_id: InstrumentId,
-    ) -> bool:
-        """
-        Validate oracle price consistency between chains.
-        """
+    async def _validate_oracle_prices(self, buy_chain: str, sell_chain: str, instrument_id: InstrumentId) -> bool:
+        """Validate oracle price consistency between chains."""
         try:
             # Get oracle proofs for both chains
             buy_proof = self.oracle_proofs.get(buy_chain)
@@ -683,9 +642,7 @@ class CrossRollupMarketMaker(Strategy):
 
             # Check proof freshness (should be less than 60 seconds old)
             current_time = asyncio.get_event_loop().time()
-            if (current_time - buy_proof["timestamp"]) > 60 or (
-                current_time - sell_proof["timestamp"]
-            ) > 60:
+            if (current_time - buy_proof["timestamp"]) > 60 or (current_time - sell_proof["timestamp"]) > 60:
                 self.log.warning("Oracle proofs are stale, refreshing")
                 await self._refresh_oracle_proofs()
 
@@ -695,24 +652,11 @@ class CrossRollupMarketMaker(Strategy):
             self.log.error(f"Error validating oracle prices: {e}")
             return False
 
-    def _check_position_limits(
-        self,
-        buy_chain: str,
-        sell_chain: str,
-        instrument_id: InstrumentId,
-    ) -> bool:
-        """
-        Check if position limits allow for the arbitrage trade.
-        """
+    def _check_position_limits(self, buy_chain: str, sell_chain: str, instrument_id: InstrumentId) -> bool:
+        """Check if position limits allow for the arbitrage trade."""
         try:
-            buy_position = self.cross_chain_positions.get(
-                f"{buy_chain}_{instrument_id}",
-                Decimal(0),
-            )
-            sell_position = self.cross_chain_positions.get(
-                f"{sell_chain}_{instrument_id}",
-                Decimal(0),
-            )
+            buy_position = self.cross_chain_positions.get(f"{buy_chain}_{instrument_id}", Decimal(0))
+            sell_position = self.cross_chain_positions.get(f"{sell_chain}_{instrument_id}", Decimal(0))
 
             # Check if we're within position limits
             if abs(buy_position) >= self.config.max_position_per_chain:
@@ -729,10 +673,8 @@ class CrossRollupMarketMaker(Strategy):
             self.log.error(f"Error checking position limits: {e}")
             return False
 
-    async def _validate_gas_costs(self, buy_chain: str, sell_chain: str, opportunity: dict) -> bool:
-        """
-        Validate that gas costs don't exceed profit potential.
-        """
+    async def _validate_gas_costs(self, buy_chain: str, sell_chain: str, opportunity: Dict) -> bool:
+        """Validate that gas costs don't exceed profit potential."""
         try:
             buy_gas = self.gas_prices.get(buy_chain, Decimal("0.1"))
             sell_gas = self.gas_prices.get(sell_chain, Decimal("0.1"))
@@ -742,9 +684,7 @@ class CrossRollupMarketMaker(Strategy):
 
             # Gas costs should be less than 20% of expected profit
             if total_gas_cost > (expected_profit * Decimal("0.2")):
-                self.log.warning(
-                    f"Gas costs too high: {total_gas_cost} vs profit {expected_profit}",
-                )
+                self.log.warning(f"Gas costs too high: {total_gas_cost} vs profit {expected_profit}")
                 return False
 
             return True
@@ -754,9 +694,7 @@ class CrossRollupMarketMaker(Strategy):
             return False
 
     def _check_ibc_capacity(self, buy_chain: str, sell_chain: str) -> bool:
-        """
-        Check if IBC transfer capacity is available.
-        """
+        """Check if IBC transfer capacity is available."""
         try:
             # Check pending transfers in bridge queues
             buy_queue_size = len(self.bridge_queues.get(buy_chain, []))
@@ -764,9 +702,7 @@ class CrossRollupMarketMaker(Strategy):
 
             # Don't allow arbitrage if too many pending transfers
             if buy_queue_size > 5 or sell_queue_size > 5:
-                self.log.warning(
-                    f"Too many pending IBC transfers: {buy_chain}={buy_queue_size}, {sell_chain}={sell_queue_size}",
-                )
+                self.log.warning(f"Too many pending IBC transfers: {buy_chain}={buy_queue_size}, {sell_chain}={sell_queue_size}")
                 return False
 
             return True
@@ -775,13 +711,12 @@ class CrossRollupMarketMaker(Strategy):
             self.log.error(f"Error checking IBC capacity: {e}")
             return False
 
-    def _calculate_position_risk(self) -> dict[str, float]:
+    def _calculate_position_risk(self) -> Dict[str, float]:
         """
         Calculate position risk metrics across all chains.
 
-        This method provides comprehensive risk metrics for cross-chain position
-        management.
-
+        This method provides comprehensive risk metrics for
+        cross-chain position management.
         """
         try:
             risk_metrics = {}
@@ -789,14 +724,13 @@ class CrossRollupMarketMaker(Strategy):
             # Calculate per-chain risk
             for chain in self.config.target_chains:
                 chain_positions = {
-                    k: v for k, v in self.cross_chain_positions.items() if k.startswith(f"{chain}_")
+                    k: v for k, v in self.cross_chain_positions.items()
+                    if k.startswith(f"{chain}_")
                 }
 
                 total_exposure = sum(abs(pos) for pos in chain_positions.values())
                 risk_metrics[f"{chain}_exposure"] = float(total_exposure)
-                risk_metrics[f"{chain}_utilization"] = float(
-                    total_exposure / self.config.max_position_per_chain,
-                )
+                risk_metrics[f"{chain}_utilization"] = float(total_exposure / self.config.max_position_per_chain)
 
             # Calculate cross-chain concentration risk
             instrument_concentrations = {}
@@ -806,9 +740,7 @@ class CrossRollupMarketMaker(Strategy):
                     instrument_concentrations[instrument_str] = Decimal(0)
                 instrument_concentrations[instrument_str] += abs(position)
 
-            max_concentration = (
-                max(instrument_concentrations.values()) if instrument_concentrations else Decimal(0)
-            )
+            max_concentration = max(instrument_concentrations.values()) if instrument_concentrations else Decimal(0)
             risk_metrics["max_instrument_concentration"] = float(max_concentration)
 
             return risk_metrics
@@ -821,9 +753,8 @@ class CrossRollupMarketMaker(Strategy):
         """
         Emergency position closure across all chains.
 
-        This method is called when circuit breakers are triggered or when emergency
-        shutdown is required.
-
+        This method is called when circuit breakers are triggered
+        or when emergency shutdown is required.
         """
         try:
             self.log.warning("EMERGENCY: Initiating cross-chain position closure")
@@ -847,3 +778,109 @@ class CrossRollupMarketMaker(Strategy):
             self.log.error(f"Error during emergency position closure: {e}")
 
     # Add this method before the __main__ section
+    async def _monitor_ibc_transfers(self) -> None:
+        """Monitor and manage IBC transfer status."""
+        try:
+            # Check status of pending transfers
+            for chain, queue in self.bridge_queues.items():
+                for transfer in queue[:]:  # Use slice copy to avoid modification during iteration
+                    if transfer.get("status") == "pending":
+                        # Check if transfer has completed
+                        if await self._check_transfer_status(transfer):
+                            transfer["status"] = "completed"
+                            queue.remove(transfer)
+
+        except Exception as e:
+            self.log.error(f"Error monitoring IBC transfers: {e}")
+
+    async def _check_transfer_status(self, transfer: Dict) -> bool:
+        """Check if an IBC transfer has completed."""
+        try:
+            # In a real implementation, this would query the IBC transfer status
+            # via the chain's API or IBC relayer
+
+            # Placeholder: assume transfers complete after timeout
+            current_time = asyncio.get_event_loop().time()
+            transfer_age = current_time - transfer["timestamp"]
+
+            return transfer_age > self.config.ibc_timeout_seconds
+
+        except Exception as e:
+            self.log.error(f"Error checking transfer status: {e}")
+            return False
+
+
+# ===================================================================
+# RUN APPLICATION
+# ===================================================================
+if __name__ == "__main__":
+    # Configure strategy
+    config = CrossRollupMMConfig(
+        target_chains=["arbitrum", "optimism", "polygon", "base"],
+        instruments_per_chain={
+            "arbitrum": [InstrumentId.from_str("BTC-USD.DYDX"), InstrumentId.from_str("ETH-USD.DYDX")],
+            "optimism": [InstrumentId.from_str("BTC-USD.DYDX"), InstrumentId.from_str("SOL-USD.DYDX")],
+            "polygon": [InstrumentId.from_str("ETH-USD.DYDX"), InstrumentId.from_str("AVAX-USD.DYDX")],
+            "base": [InstrumentId.from_str("BTC-USD.DYDX"), InstrumentId.from_str("ETH-USD.DYDX")],
+        },
+        base_spread_bps=20,
+        cross_chain_spread_bps=50,
+        max_position_per_chain=Decimal("5000.0"),
+        bridge_threshold=Decimal("1000.0"),
+        gas_optimization=True,
+        min_compound_usd=Decimal("20.0"),
+        max_gas_ratio=Decimal("0.66"),
+        oracle_proof_required=True,
+        ibc_timeout_seconds=45,
+        ibc_retry_attempts=3,
+    )
+
+    # Initialize strategy
+    strategy = CrossRollupMarketMaker(config)
+
+    # Configure trading node
+    node_config = TradingNodeConfig(
+        trader_id=TraderId("CROSS_ROLLUP_MM"),
+        logging=LoggingConfig(
+            log_level="INFO",
+            log_to_file=True,
+            log_file_name="cross_rollup_mm.log",
+        ),
+        cache=CacheConfig(
+            database=None,  # Use in-memory cache
+        ),
+        data_clients={
+            "DYDX": DYDXDataClientConfig(
+                wallet_address=None,  # 'DYDX_WALLET_ADDRESS' env var
+                instrument_provider=InstrumentProviderConfig(load_all=True),
+                is_testnet=True,  # If client uses the testnet API
+            ),
+        },
+        exec_clients={
+            "DYDX": DYDXExecClientConfig(
+                wallet_address=None,  # 'DYDX_WALLET_ADDRESS' env var
+                mnemonic=None,  # 'DYDX_MNEMONIC' env var
+                base_url_http=None,  # Override with custom endpoint
+                base_url_ws=None,  # Override with custom endpoint
+                instrument_provider=InstrumentProviderConfig(load_all=True),
+                is_testnet=True,  # If client uses the testnet API
+            ),
+        },
+        exec_engine=LiveExecEngineConfig(
+            reconciliation_lookback_mins=1440,  # 24 hours
+        ),
+        strategies=[strategy],
+    )
+
+    # Create and run trading node
+    try:
+        _LOG.info("Starting Cross-Rollup Market Maker for dYdX v4")
+
+        node = TradingNode(config=node_config)
+        node.run()
+
+    except KeyboardInterrupt:
+        _LOG.info("Shutting down Cross-Rollup Market Maker")
+    except Exception as e:
+        _LOG.error(f"Fatal error in Cross-Rollup Market Maker: {e}")
+        raise

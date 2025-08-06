@@ -28,6 +28,7 @@ use nautilus_common::{
     logging::log_info,
 };
 use nautilus_core::env::get_env_var;
+use nautilus_infrastructure::sql::pg::PostgresConnectOptions;
 use nautilus_live::node::LiveNode;
 use nautilus_model::{
     defi::{Block, Blockchain, Pool, PoolLiquidityUpdate, PoolSwap, chain::chains},
@@ -62,12 +63,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_factory = BlockchainDataClientFactory::new();
     let client_config = BlockchainDataClientConfig::new(
         Arc::new(chain.clone()),
+        vec!["Arbitrum:UniswapV3".to_string()],
         http_rpc_url,
         None, // RPC requests per second
         Some(wss_rpc_url),
         true, // Use HyperSync for live data
         // Some(from_block), // from_block
         from_block,
+        Some(PostgresConnectOptions::default()),
     );
 
     let mut node = LiveNode::builder(node_name, trader_id, environment)?
@@ -75,8 +78,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_save_state(false)
         .add_data_client(
             None, // Use factory name
-            client_factory,
-            client_config,
+            Box::new(client_factory),
+            Box::new(client_config),
         )?
         .build()?;
 
@@ -84,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_id = ClientId::new(format!("BLOCKCHAIN-{}", chain.name));
 
     let pools = vec![
-        InstrumentId::from("WETH/USDC-3000.UniswapV3:Arbitrum"), // Arbitrum WETH/USDC 0.30% pool
+        InstrumentId::from("WETH/USDC-3000.Arbitrum:UniswapV3"), // Arbitrum WETH/USDC 0.30% pool
     ];
 
     let actor_config = BlockchainSubscriberActorConfig::new(client_id, chain.name, pools);

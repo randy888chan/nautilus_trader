@@ -33,7 +33,7 @@ impl ClientConfig for BlockchainDataClientConfig {
 ///
 /// This factory creates `BlockchainDataClient` instances configured for different blockchain networks
 /// (Ethereum, Arbitrum, Base, Polygon) with appropriate RPC and HyperSync configurations.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(module = "nautilus_trader.core.nautilus_pyo3.blockchain")
@@ -100,10 +100,12 @@ mod tests {
         let chain = Arc::new(chains::ETHEREUM.clone());
         let config = BlockchainDataClientConfig::new(
             chain,
+            vec![],
             "https://eth-mainnet.example.com".to_string(),
             None,
             None,
             false,
+            None,
             None,
         );
 

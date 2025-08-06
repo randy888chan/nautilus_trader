@@ -94,6 +94,7 @@ The platform implements various aggregation methods:
 | `DAY`              | Aggregation of time intervals with day granularity.                        | Time         |
 | `WEEK`             | Aggregation of time intervals with week granularity.                       | Time         |
 | `MONTH`            | Aggregation of time intervals with month granularity.                      | Time         |
+| `YEAR`             | Aggregation of time intervals with year granularity.                       | Time         |
 
 ### Types of aggregation
 
@@ -316,10 +317,10 @@ If historical aggregated bars are needed, you can use specialized request `reque
 
 ```python
 # Request bars that are aggregated from historical trade ticks
-self.request_aggregated_bars(BarType.from_str("6EH4.XCME-100-VOLUME-LAST-INTERNAL"))
+self.request_aggregated_bars([BarType.from_str("6EH4.XCME-100-VOLUME-LAST-INTERNAL")])
 
 # Request bars that are aggregated from other bars
-self.request_aggregated_bars(BarType.from_str("6EH4.XCME-5-MINUTE-LAST-INTERNAL@1-MINUTE-EXTERNAL"))
+self.request_aggregated_bars([BarType.from_str("6EH4.XCME-5-MINUTE-LAST-INTERNAL@1-MINUTE-EXTERNAL")])
 ```
 
 ### Common Pitfalls
@@ -436,6 +437,7 @@ Data wranglers are implemented per specific Nautilus data type, and can be found
 Currently there exists:
 
 - `OrderBookDeltaDataWrangler`
+- `OrderBookDepth10DataWrangler`
 - `QuoteTickDataWrangler`
 - `TradeTickDataWrangler`
 - `BarDataWrangler`
@@ -1047,7 +1049,7 @@ Reset parquet file names to match their actual content timestamps. This ensures 
 
 ```python
 # Reset all parquet files in the catalog
-catalog.reset_catalog_file_names()
+catalog.reset_all_file_names()
 ```
 
 **Reset specific data type:**

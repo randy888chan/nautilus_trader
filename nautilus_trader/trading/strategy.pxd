@@ -47,6 +47,7 @@ from nautilus_trader.model.events.position cimport PositionChanged
 from nautilus_trader.model.events.position cimport PositionClosed
 from nautilus_trader.model.events.position cimport PositionEvent
 from nautilus_trader.model.events.position cimport PositionOpened
+from nautilus_trader.model.identifiers cimport AccountId
 from nautilus_trader.model.identifiers cimport ClientId
 from nautilus_trader.model.identifiers cimport ClientOrderId
 from nautilus_trader.model.identifiers cimport InstrumentId
@@ -124,13 +125,15 @@ cdef class Strategy(Actor):
         self,
         Order order,
         PositionId position_id=*,
-        ClientId client_id=*, dict[str, object] params=*,
+        ClientId client_id=*,
+        dict[str, object] params=*,
     )
     cpdef void submit_order_list(
         self,
         OrderList order_list,
         PositionId position_id=*,
-        ClientId client_id=*, dict[str, object] params=*,
+        ClientId client_id=*,
+        dict[str, object] params=*,
     )
     cpdef void modify_order(
         self,
@@ -138,13 +141,15 @@ cdef class Strategy(Actor):
         Quantity quantity=*,
         Price price=*,
         Price trigger_price=*,
-        ClientId client_id=*, dict[str, object] params=*,
+        ClientId client_id=*,
+        dict[str, object] params=*,
     )
     cpdef void cancel_order(self, Order order, ClientId client_id=*, dict[str, object] params=*)
     cpdef void cancel_orders(self, list orders, ClientId client_id=*, dict[str, object] params=*)
     cpdef void cancel_all_orders(self, InstrumentId instrument_id, OrderSide order_side=*, ClientId client_id=*, dict[str, object] params=*)
     cpdef void close_position(self, Position position, ClientId client_id=*, list[str] tags=*, TimeInForce time_in_force=*, bint reduce_only=*, dict[str, object] params=*)
     cpdef void close_all_positions(self, InstrumentId instrument_id, PositionSide position_side=*, ClientId client_id=*, list[str] tags=*, TimeInForce time_in_force=*, bint reduce_only=*, dict[str, object] params=*)
+    cpdef void query_account(self, AccountId account_id, ClientId client_id=*, dict[str, object] params=*)
     cpdef void query_order(self, Order order, ClientId client_id=*, dict[str, object] params=*)
     cdef ModifyOrder _create_modify_order(
         self,

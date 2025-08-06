@@ -21,7 +21,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use nautilus_core::UnixNanos;
 #[cfg(feature = "defi")]
-use nautilus_model::defi::{AmmType, Dex, Pool, Token, chain::chains};
+use nautilus_model::defi::{AmmType, Dex, DexType, Pool, Token, chain::chains};
 use nautilus_model::{
     accounts::AccountAny,
     data::{Bar, MarkPriceUpdate, QuoteTick, TradeTick},
@@ -336,6 +336,7 @@ fn test_position_ids_filtering(mut cache: Cache) {
             4,
             Price::from("0.01"),
             Quantity::from("0.0001"),
+            None,
             None,
             None,
             None,
@@ -741,8 +742,9 @@ fn test_pool() -> Pool {
     let chain = Arc::new(chains::ETHEREUM.clone());
     let dex = Dex::new(
         chains::ETHEREUM.clone(),
-        "UniswapV3",
+        DexType::UniswapV3,
         "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+        0,
         AmmType::CLAMM,
         "PoolCreated(address,address,uint24,int24,address)",
         "Swap(address,address,int256,int256,uint160,uint128,int24)",
@@ -772,7 +774,7 @@ fn test_pool() -> Pool {
 
     Pool::new(
         chain,
-        dex,
+        Arc::new(dex),
         "0x11b815efB8f581194ae79006d24E0d814B7697F6"
             .parse()
             .unwrap(),

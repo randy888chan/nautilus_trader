@@ -13,6 +13,19 @@ M = $(shell printf "$(BLUE)>$(RESET)") # Message prefix for commands
 # Verbose options for specific targets (defaults to true, can be overridden)
 VERBOSE ?= true
 
+# FAIL_FAST controls whether `cargo nextest` should stop after the first test
+# failure. When set to `true` the `--no-fail-fast` flag is omitted so tests
+# abort on the first failure. When `false` (the default) the flag is included
+# allowing the full test suite to run.
+FAIL_FAST ?= false
+
+# Select the appropriate flag for `cargo nextest` depending on FAIL_FAST.
+ifeq ($(FAIL_FAST),true)
+FAIL_FAST_FLAG :=
+else
+FAIL_FAST_FLAG := --no-fail-fast
+endif
+
 # > Colors
 RED    := $(shell tput -Txterm setaf 1)
 GREEN  := $(shell tput -Txterm setaf 2)
@@ -56,6 +69,16 @@ ifeq ($(VERBOSE),true)
 else
 	$(info $(M) Building in debug mode (errors will still be shown)...)
 	BUILD_MODE=debug uv run --active --no-sync build.py 2>&1 | grep -E "(Error|error|ERROR|Failed|failed|FAILED|Warning|warning|WARNING|Build completed|Build time:|Traceback)" || true
+endif
+
+.PHONY: build-debug-pyo3
+build-debug-pyo3:  #-- Build the package with PyO3 debug symbols (for debugging Rust code)
+ifeq ($(VERBOSE),true)
+	$(info $(M) Building in debug mode with PyO3 debug symbols...)
+	BUILD_MODE=debug-pyo3 uv run --active --no-sync build.py
+else
+	$(info $(M) Building in debug mode with PyO3 debug symbols (errors will still be shown)...)
+	BUILD_MODE=debug-pyo3 uv run --active --no-sync build.py 2>&1 | grep -E "(Error|error|ERROR|Failed|failed|FAILED|Warning|warning|WARNING|Build completed|Build time:|Traceback)" || true
 endif
 
 .PHONY: build-wheel
@@ -210,10 +233,10 @@ cargo-test: check-nextest-installed
 cargo-test:  #-- Run all Rust tests with ffi,python,high-precision,defi features
 ifeq ($(VERBOSE),true)
 	$(info $(M) Running Rust tests with verbose output...)
-	cargo nextest run --workspace --features "ffi,python,high-precision,defi" --no-fail-fast --cargo-profile nextest --verbose
+	cargo nextest run --workspace --features "ffi,python,high-precision,defi" $(FAIL_FAST_FLAG) --cargo-profile nextest --verbose
 else
 	$(info $(M) Running Rust tests (showing summary and failures only)...)
-	cargo nextest run --workspace --features "ffi,python,high-precision,defi" --no-fail-fast --cargo-profile nextest --status-level fail --final-status-level flaky
+	cargo nextest run --workspace --features "ffi,python,high-precision,defi" $(FAIL_FAST_FLAG) --cargo-profile nextest --status-level fail --final-status-level flaky
 endif
 
 .PHONY: cargo-test-lib
@@ -221,21 +244,21 @@ cargo-test-lib: RUST_BACKTRACE=1
 cargo-test-lib: HIGH_PRECISION=true
 cargo-test-lib: check-nextest-installed
 cargo-test-lib:  #-- Run Rust library tests only with high precision
-	cargo nextest run --lib --workspace --no-default-features --features "ffi,python,high-precision,defi,stubs" --no-fail-fast --cargo-profile nextest
+	cargo nextest run --lib --workspace --no-default-features --features "ffi,python,high-precision,defi,stubs" $(FAIL_FAST_FLAG) --cargo-profile nextest
 
 .PHONY: cargo-test-standard-precision
 cargo-test-standard-precision: RUST_BACKTRACE=1
 cargo-test-standard-precision: HIGH_PRECISION=false
 cargo-test-standard-precision: check-nextest-installed
 cargo-test-standard-precision:  #-- Run Rust tests with standard precision (64-bit)
-	cargo nextest run --workspace --features "ffi,python" --no-fail-fast --cargo-profile nextest
+	cargo nextest run --workspace --features "ffi,python" $(FAIL_FAST_FLAG) --cargo-profile nextest
 
 .PHONY: cargo-test-debug
 cargo-test-debug: RUST_BACKTRACE=1
 cargo-test-debug: HIGH_PRECISION=true
 cargo-test-debug: check-nextest-installed
 cargo-test-debug:  #-- Run Rust tests in debug mode with high precision
-	cargo nextest run --workspace --features "ffi,python,high-precision,defi" --no-fail-fast
+	cargo nextest run --workspace --features "ffi,python,high-precision,defi" $(FAIL_FAST_FLAG)
 
 .PHONY: cargo-test-standard-precision-debug
 cargo-test-standard-precision-debug: RUST_BACKTRACE=1
@@ -268,14 +291,14 @@ cargo-test-crate-%: RUST_BACKTRACE=1
 cargo-test-crate-%: HIGH_PRECISION=true
 cargo-test-crate-%: check-nextest-installed
 cargo-test-crate-%:  #-- Run Rust tests for a specific crate (usage: make cargo-test-crate-<crate_name>)
-	cargo nextest run --lib --no-fail-fast --cargo-profile nextest -p $* $(if $(FEATURES),--features "$(FEATURES)")
+	cargo nextest run --lib $(FAIL_FAST_FLAG) --cargo-profile nextest -p $* $(if $(FEATURES),--features "$(FEATURES)")
 
 .PHONY: cargo-test-coverage-crate-%
 cargo-test-coverage-crate-%: RUST_BACKTRACE=1
 cargo-test-coverage-crate-%: HIGH_PRECISION=true
 cargo-test-coverage-crate-%: check-nextest-installed check-llvm-cov-installed
 cargo-test-coverage-crate-%:  #-- Run Rust tests with coverage reporting for a specific crate (usage: make cargo-test-coverage-crate-<crate_name>)
-	cargo llvm-cov nextest --lib --no-fail-fast --cargo-profile nextest -p $* $(if $(FEATURES),--features "$(FEATURES)")
+	cargo llvm-cov nextest --lib $(FAIL_FAST_FLAG) --cargo-profile nextest -p $* $(if $(FEATURES),--features "$(FEATURES)")
 
 #------------------------------------------------------------------------------
 # Benchmarks
@@ -322,25 +345,45 @@ docker-build-jupyter:  #-- Build JupyterLab Docker image
 docker-push-jupyter:  #-- Push JupyterLab Docker image to registry
 	docker push $(IMAGE):jupyter
 
+.PHONY: init-services
+init-services:  #-- Initialize development services eg. for integration tests (start containers and setup database)
+	$(info $(M) Initializing development services...)
+	@$(MAKE) start-services
+	@echo "${PURPLE}Waiting for PostgreSQL to be ready...${RESET}"
+	@sleep 10
+	@$(MAKE) init-db
+
 .PHONY: start-services
-start-services:  #-- Start development services with docker-compose
+start-services:  #-- Start development services (without reinitializing database)
+	$(info $(M) Starting development services...)
 	docker compose -f .docker/docker-compose.yml up -d
 
 .PHONY: stop-services
-stop-services:  #-- Stop development services
+stop-services:  #-- Stop development services (preserves data)
+	$(info $(M) Stopping development services...)
 	docker compose -f .docker/docker-compose.yml down
+
+.PHONY: purge-services
+purge-services:  #-- Purge all development services (stop containers and remove volumes)
+	$(info $(M) Purging integration test services...)
+	docker compose -f .docker/docker-compose.yml down -v
+
+.PHONY: init-db
+init-db:  #-- Initialize PostgreSQL database schema
+	$(info $(M) Initializing PostgreSQL database schema...)
+	cat schema/sql/*.sql | docker exec -i nautilus-database psql -U nautilus -d nautilus
 
 #== Python Testing
 
 .PHONY: pytest
-pytest:  #-- Run Python tests with pytest
-ifeq ($(VERBOSE),true)
-	$(info $(M) Running Python tests with verbose output...)
-	uv run --active --no-sync pytest --new-first --failed-first -v
-else
-	$(info $(M) Running Python tests (showing failures and summary only)...)
-	uv run --active --no-sync pytest --new-first --failed-first --tb=short
-endif
+pytest:  #-- Run Python tests with pytest in parallel with immediate failure reporting
+	$(info $(M) Running Python tests in parallel with immediate failure reporting...)
+	uv run --active --no-sync pytest --new-first --failed-first --tb=line -n logical --dist=loadgroup --maxfail=50 $(if $(filter true,$(VERBOSE)),-v,)
+
+.PHONY: pytest-memory-tracking
+pytest-memory-tracking:  #-- Run Python tests with memory tracking enabled
+	$(info $(M) Running Python tests with memory tracking enabled...)
+	MEMORY_TRACKING_ENABLED_PY=true uv run --active --no-sync pytest --new-first --failed-first -v -n logical --dist=loadgroup
 
 .PHONY: test-performance
 test-performance:  #-- Run performance tests with codspeed benchmarking
@@ -359,7 +402,8 @@ help:  #-- Show this help message and exit
 	@printf "Nautilus Trader Makefile\n\n"
 	@printf "$(GREEN)Usage:$(RESET) make $(CYAN)<target>$(RESET)\n\n"
 	@printf "$(GRAY)Tips: Use $(CYAN)make <target> V=1$(GRAY) for verbose output$(RESET)\n"
-	@printf "$(GRAY)      Use $(CYAN)make <target> VERBOSE=false$(GRAY) to disable verbose output for build-debug, cargo-test, and pytest$(RESET)\n\n"
+	@printf "$(GRAY)      Use $(CYAN)make <target> VERBOSE=false$(GRAY) to disable verbose output for build-debug, cargo-test, and pytest$(RESET)\n"
+	@printf "$(GRAY)      Use $(CYAN)make pytest VERBOSE=true$(GRAY) to run tests with verbose output$(RESET)\n\n"
 
 	@printf "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⣶⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n"
 	@printf "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⣾⣿⣿⣿⠀⢸⣿⣿⣿⣿⣶⣶⣤⣀⠀⠀⠀⠀⠀\n"

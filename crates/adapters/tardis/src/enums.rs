@@ -174,7 +174,6 @@ pub enum Exchange {
     HuobiDmSwap,
     Hyperliquid,
     Kraken,
-    KrakenFutures,
     Kucoin,
     KucoinFutures,
     Mango,
@@ -209,8 +208,8 @@ impl Exchange {
             "BINANCE_DELIVERY" => vec![Self::BinanceDelivery],
             "BINANCE_US" => vec![Self::BinanceUs],
             "BITFINEX" => vec![Self::Bitfinex, Self::BitfinexDerivatives],
-            "BITGET" => vec![Self::Bitget, Self::BitgetFutures],
             "BITFLYER" => vec![Self::Bitflyer],
+            "BITGET" => vec![Self::Bitget, Self::BitgetFutures],
             "BITMEX" => vec![Self::Bitmex],
             "BITNOMIAL" => vec![Self::Bitnomial],
             "BITSTAMP" => vec![Self::Bitstamp],
@@ -237,7 +236,7 @@ impl Exchange {
             ],
             "HUOBI_DELIVERY" => vec![Self::HuobiDmSwap],
             "HYPERLIQUID" => vec![Self::Hyperliquid],
-            "KRAKEN" => vec![Self::Kraken, Self::KrakenFutures],
+            "KRAKEN" => vec![Self::Kraken],
             "KUCOIN" => vec![Self::Kucoin, Self::KucoinFutures],
             "MANGO" => vec![Self::Mango],
             "OKCOIN" => vec![Self::Okcoin],
@@ -251,7 +250,7 @@ impl Exchange {
             "PHEMEX" => vec![Self::Phemex],
             "POLONIEX" => vec![Self::Poloniex],
             "SERUM" => vec![Self::Serum],
-            "STARATLAS" => vec![Self::StarAtlas],
+            "STAR_ATLAS" => vec![Self::StarAtlas],
             "UPBIT" => vec![Self::Upbit],
             "WOO_X" => vec![Self::WooX],
             _ => Vec::new(),
@@ -305,7 +304,6 @@ impl Exchange {
             Self::HuobiDmSwap => "HUOBI_DELIVERY",
             Self::Hyperliquid => "HYPERLIQUID",
             Self::Kraken => "KRAKEN",
-            Self::KrakenFutures => "KRAKEN",
             Self::Kucoin => "KUCOIN",
             Self::KucoinFutures => "KUCOIN",
             Self::Mango => "MANGO",
@@ -318,7 +316,7 @@ impl Exchange {
             Self::Phemex => "PHEMEX",
             Self::Poloniex => "POLONIEX",
             Self::Serum => "SERUM",
-            Self::StarAtlas => "STARATLAS",
+            Self::StarAtlas => "STAR_ATLAS",
             Self::Upbit => "UPBIT",
             Self::WooX => "WOO_X",
         }
@@ -327,5 +325,66 @@ impl Exchange {
     #[must_use]
     pub fn as_venue(&self) -> Venue {
         Venue::from_ustr_unchecked(Ustr::from(self.as_venue_str()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use strum::IntoEnumIterator;
+
+    use super::*;
+
+    #[rstest]
+    fn test_exchange_to_venue_mapping() {
+        for exchange in Exchange::iter() {
+            let venue_str = exchange.as_venue_str();
+            assert!(
+                Venue::new_checked(venue_str).is_ok(),
+                "Tardis exchange '{exchange:?}' maps to invalid Nautilus venue '{venue_str}'",
+            );
+        }
+    }
+
+    #[rstest]
+    fn test_venue_to_exchange_mapping_bidirectional() {
+        let test_venues = [
+            "BINANCE",
+            "BITMEX",
+            "DERIBIT",
+            "KRAKEN",
+            "COINBASE",
+            "BYBIT",
+            "OKEX",
+            "HUOBI",
+            "GATE_IO",
+            "KUCOIN",
+            "BITFINEX",
+            "GEMINI",
+            "BITSTAMP",
+            "ASCENDEX",
+            "PHEMEX",
+            "POLONIEX",
+            "UPBIT",
+            "WOO_X",
+            "HYPERLIQUID",
+            "CRYPTO_COM",
+            "DYDX",
+            "HITBTC",
+        ];
+
+        for venue_str in test_venues {
+            let venue = Venue::new(venue_str);
+            let exchanges = Exchange::from_venue_str(venue.as_str());
+
+            for exchange in exchanges {
+                assert_eq!(
+                    exchange.as_venue_str(),
+                    venue_str,
+                    "Bidirectional mapping failed: Nautilus venue '{venue_str}' -> Tardis exchange '{exchange:?}' -> Nautilus venue '{}'",
+                    exchange.as_venue_str()
+                );
+            }
+        }
     }
 }

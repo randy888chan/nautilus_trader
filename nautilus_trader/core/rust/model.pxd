@@ -1283,6 +1283,17 @@ cdef extern from "../includes/model.h":
 
     const char *mark_price_update_to_cstr(const MarkPriceUpdate_t *value);
 
+    IndexPriceUpdate_t index_price_update_new(InstrumentId_t instrument_id,
+                                              Price_t value,
+                                              uint64_t ts_event,
+                                              uint64_t ts_init);
+
+    uint8_t index_price_update_eq(const IndexPriceUpdate_t *lhs, const IndexPriceUpdate_t *rhs);
+
+    uint64_t index_price_update_hash(const IndexPriceUpdate_t *value);
+
+    const char *index_price_update_to_cstr(const IndexPriceUpdate_t *value);
+
     QuoteTick_t quote_tick_new(InstrumentId_t instrument_id,
                                Price_t bid_price,
                                Price_t ask_price,
@@ -2056,7 +2067,7 @@ cdef extern from "../includes/model.h":
 
     uint8_t orderbook_check_integrity(const OrderBook_API *book);
 
-    void vec_fills_drop(CVec v);
+    void vec_drop_fills(CVec v);
 
     # Returns a pretty printed `OrderBook` number of levels per side, as a C string pointer.
     const char *orderbook_pprint_to_cstr(const OrderBook_API *book, uintptr_t num_levels);
@@ -2077,9 +2088,9 @@ cdef extern from "../includes/model.h":
 
     double level_exposure(const BookLevel_API *level);
 
-    void vec_levels_drop(CVec v);
+    void vec_drop_book_levels(CVec v);
 
-    void vec_orders_drop(CVec v);
+    void vec_drop_book_orders(CVec v);
 
     # Returns a [`Currency`] from pointers and primitives.
     #

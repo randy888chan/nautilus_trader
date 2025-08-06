@@ -20,7 +20,7 @@ use std::{
     ops::{Add, Mul},
 };
 
-use implied_vol::{implied_black_volatility, norm_cdf, norm_pdf};
+use implied_vol::{DefaultSpecialFn, SpecialFn, implied_black_volatility};
 use nautilus_core::{UnixNanos, datetime::unix_nanos_to_iso8601, math::quadratic_interpolation};
 
 use crate::{data::HasTsInit, identifiers::InstrumentId};
@@ -56,9 +56,9 @@ pub fn black_scholes_greeks(
     let scaled_vol = sigma * t.sqrt();
     let d1 = ((s / k).ln() + (b + 0.5 * sigma.powi(2)) * t) / scaled_vol;
     let d2 = d1 - scaled_vol;
-    let cdf_phi_d1 = norm_cdf(phi * d1);
-    let cdf_phi_d2 = norm_cdf(phi * d2);
-    let dist_d1 = norm_pdf(d1);
+    let cdf_phi_d1 = DefaultSpecialFn::norm_cdf(phi * d1);
+    let cdf_phi_d2 = DefaultSpecialFn::norm_cdf(phi * d2);
+    let dist_d1 = DefaultSpecialFn::norm_pdf(d1);
     let df = ((b - r) * t).exp();
     let s_t = s * df;
     let k_t = k * (-r * t).exp();
@@ -135,6 +135,7 @@ pub struct GreeksData {
     pub is_call: bool,
     pub strike: f64,
     pub expiry: i32,
+    pub expiry_in_days: i32,
     pub expiry_in_years: f64,
     pub multiplier: f64,
     pub quantity: f64,
@@ -161,6 +162,7 @@ impl GreeksData {
         is_call: bool,
         strike: f64,
         expiry: i32,
+        expiry_in_days: i32,
         expiry_in_years: f64,
         multiplier: f64,
         quantity: f64,
@@ -183,6 +185,7 @@ impl GreeksData {
             is_call,
             strike,
             expiry,
+            expiry_in_days,
             expiry_in_years,
             multiplier,
             quantity,
@@ -213,6 +216,7 @@ impl GreeksData {
             is_call: true,
             strike: 0.0,
             expiry: 0,
+            expiry_in_days: 0,
             expiry_in_years: 0.0,
             multiplier,
             quantity: 1.0,
@@ -240,6 +244,7 @@ impl Default for GreeksData {
             is_call: true,
             strike: 0.0,
             expiry: 0,
+            expiry_in_days: 0,
             expiry_in_years: 0.0,
             multiplier: 0.0,
             quantity: 0.0,
@@ -291,6 +296,7 @@ impl Mul<&GreeksData> for f64 {
             is_call: greeks.is_call,
             strike: greeks.strike,
             expiry: greeks.expiry,
+            expiry_in_days: greeks.expiry_in_days,
             expiry_in_years: greeks.expiry_in_years,
             multiplier: greeks.multiplier,
             quantity: greeks.quantity,
@@ -503,6 +509,7 @@ mod tests {
             true,
             500.0,
             20240315,
+            91, // expiry_in_days (approximately 3 months)
             0.25,
             100.0,
             1.0,
@@ -1104,6 +1111,7 @@ mod tests {
             false, // Put option
             480.0,
             20240315,
+            91, // expiry_in_days (approximately 3 months)
             0.25,
             100.0,
             1.0,
