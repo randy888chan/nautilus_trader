@@ -24,6 +24,8 @@ use std::{
 use nautilus_core::correctness::check_valid_string;
 use serde::{Deserialize, Deserializer, Serialize};
 
+#[cfg(feature = "defi")]
+use crate::defi::validation::validate_address;
 use crate::identifiers::{Symbol, Venue};
 
 /// Represents a valid instrument ID.
@@ -72,10 +74,18 @@ impl FromStr for InstrumentId {
             Some((symbol_part, venue_part)) => {
                 check_valid_string(symbol_part, stringify!(value))?;
                 check_valid_string(venue_part, stringify!(value))?;
-                Ok(Self {
-                    symbol: Symbol::new(symbol_part),
-                    venue: Venue::new(venue_part),
-                })
+
+                let symbol = Symbol::new(symbol_part);
+                let venue = Venue::new_checked(venue_part)?;
+
+                #[cfg(feature = "defi")]
+                if venue.is_dex() {
+                    if let Err(e) = validate_address(symbol_part) {
+                        anyhow::bail!(err_message(s, e.to_string()));
+                    }
+                }
+
+                Ok(Self { symbol, venue })
             }
             None => {
                 anyhow::bail!(err_message(
@@ -174,5 +184,84 @@ mod tests {
         let id = InstrumentId::from("ETH/USDT.BINANCE");
         assert_eq!(id.to_string(), "ETH/USDT.BINANCE");
         assert_eq!(format!("{id}"), "ETH/USDT.BINANCE");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    fn test_blockchain_instrument_id_valid() {
+        let id =
+            InstrumentId::from("0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443.Arbitrum:UniswapV3");
+        assert_eq!(
+            id.symbol.to_string(),
+            "0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443"
+        );
+        assert_eq!(id.venue.to_string(), "Arbitrum:UniswapV3");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[should_panic(
+        expected = "Error creating `Venue` from 'InvalidChain:UniswapV3': invalid blockchain venue 'InvalidChain:UniswapV3': chain 'InvalidChain' not recognized"
+    )]
+    fn test_blockchain_instrument_id_invalid_chain() {
+        let _ =
+            InstrumentId::from("0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443.InvalidChain:UniswapV3");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[should_panic(
+        expected = "Error creating `Venue` from 'Arbitrum:': invalid blockchain venue 'Arbitrum:': expected format 'Chain:DexId'"
+    )]
+    fn test_blockchain_instrument_id_empty_dex() {
+        let _ = InstrumentId::from("0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443.Arbitrum:");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    fn test_regular_venue_with_blockchain_like_name_but_without_dex() {
+        // Should work fine since it doesn't contain ':'
+        let id = InstrumentId::from("0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443.Ethereum");
+        assert_eq!(
+            id.symbol.to_string(),
+            "0xC31E54c7a869B9FcBEcc14363CF510d1c41fa443"
+        );
+        assert_eq!(id.venue.to_string(), "Ethereum");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[should_panic(
+        expected = "Error parsing `InstrumentId` from 'invalidaddress.Ethereum:UniswapV3': Ethereum address must start with '0x': invalidaddress"
+    )]
+    fn test_blockchain_instrument_id_invalid_address_no_prefix() {
+        let _ = InstrumentId::from("invalidaddress.Ethereum:UniswapV3");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[should_panic(
+        expected = "Error parsing `InstrumentId` from '0x123.Ethereum:UniswapV3': Blockchain address '0x123' is incorrect: odd number of digits"
+    )]
+    fn test_blockchain_instrument_id_invalid_address_short() {
+        let _ = InstrumentId::from("0x123.Ethereum:UniswapV3");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[should_panic(
+        expected = "Error parsing `InstrumentId` from '0xC31E54c7a869B9FcBEcc14363CF510d1c41fa44G.Ethereum:UniswapV3': Blockchain address '0xC31E54c7a869B9FcBEcc14363CF510d1c41fa44G' is incorrect: invalid character 'G' at position 39"
+    )]
+    fn test_blockchain_instrument_id_invalid_address_non_hex() {
+        let _ = InstrumentId::from("0xC31E54c7a869B9FcBEcc14363CF510d1c41fa44G.Ethereum:UniswapV3");
+    }
+
+    #[cfg(feature = "defi")]
+    #[rstest]
+    #[should_panic(
+        expected = "Error parsing `InstrumentId` from '0xc31e54c7a869b9fcbecc14363cf510d1c41fa443.Ethereum:UniswapV3': Blockchain address '0xc31e54c7a869b9fcbecc14363cf510d1c41fa443' has incorrect checksum"
+    )]
+    fn test_blockchain_instrument_id_invalid_address_checksum() {
+        let _ = InstrumentId::from("0xc31e54c7a869b9fcbecc14363cf510d1c41fa443.Ethereum:UniswapV3");
     }
 }

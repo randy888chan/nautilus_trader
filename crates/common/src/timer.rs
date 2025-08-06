@@ -126,11 +126,20 @@ impl PartialEq for TimeEvent {
 
 pub type RustTimeEventCallback = dyn Fn(TimeEvent);
 
-#[derive(Clone)]
 pub enum TimeEventCallback {
     #[cfg(feature = "python")]
-    Python(Arc<PyObject>),
+    Python(PyObject),
     Rust(Rc<RustTimeEventCallback>),
+}
+
+impl Clone for TimeEventCallback {
+    fn clone(&self) -> Self {
+        match self {
+            #[cfg(feature = "python")]
+            Self::Python(obj) => Self::Python(nautilus_core::python::clone_py_object(obj)),
+            Self::Rust(cb) => Self::Rust(cb.clone()),
+        }
+    }
 }
 
 impl Debug for TimeEventCallback {
@@ -171,13 +180,14 @@ impl From<Rc<RustTimeEventCallback>> for TimeEventCallback {
 #[cfg(feature = "python")]
 impl From<PyObject> for TimeEventCallback {
     fn from(value: PyObject) -> Self {
-        Self::Python(Arc::new(value))
+        Self::Python(value)
     }
 }
 
 // TimeEventCallback supports both single-threaded and async use cases:
-// - Python variant uses Arc<PyObject> for cross-thread compatibility with Python's GIL
-// - Rust variant uses Rc<dyn Fn(TimeEvent)> for efficient single-threaded callbacks
+// - Python variant uses PyObject for cross-thread compatibility with Python's GIL.
+// - Rust variant uses Rc<dyn Fn(TimeEvent)> for efficient single-threaded callbacks.
+//
 // SAFETY: The async timer tasks only use Python callbacks, and Rust callbacks are never
 // sent across thread boundaries in practice. This unsafe implementation allows the enum
 // to be moved into async tasks while maintaining the efficient Rc for single-threaded use.

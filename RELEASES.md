@@ -8,6 +8,8 @@ Released on TBD (UTC).
 - Added `MarginModel` concept, base models, config, and factory for backtesting (#2794), thanks @faysou and @stefansimik
 - Added additional built-in backtest fill models (#2795), thanks @faysou and @stefansimik
 - Added `OrderBookDepth10DataWrangler` (#2801), thanks @trylovetom
+- Added Bybit options support (#2821), thanks @Baerenstein
+- Added Bybit `is_leverage` order parameter support
 - Added `persist_account_events` config option for `CacheConfig` (default `True` to retain current behavior)
 - Added `query_account` method for `Strategy`
 - Added `QueryAccount` execution message
@@ -21,16 +23,23 @@ Released on TBD (UTC).
 - Added `VERBOSE` option to common make targets (#2759), thanks @faysou
 - Added bulk key loading capability for Redis cache database adapter
 - Added `multiplier` field for `CurrencyPair` instrument (required for some crypto pairs)
+- Added `tick_scheme_name` field for instrument dictionary conversions
+- Added default `FixedTickScheme`(s) for all valid precisions
+- Added PancakeSwapV3 pool parsing (#2829), thanks @filipmacek
 
 ### Breaking Changes
 - Added `multiplier` field for `CurrencyPair` Arrow schema
 - Changed `start` parameter to required for `Actor` data request methods
 - Reverted implementation of `delete_account_event` from cache database that was too inefficient and is now a no-op pending redesign
+- Renamed `ParquetDataCatalog.reset_catalog_file_names` to `reset_all_file_names`
 - Removed the generic `cvec_drop` FFI function, as it was unused and prone to misuse, potentially causing memory leaks
+- Consolidated `OwnBook` `group_bids` and `group_asks` methods into `bid_quantity` and `ask_quantity` with optional `depth` and `group_size` parameters
+- Simplified Binance environment variables for API credentials: removed separate variables for RSA/Ed25519 keys and consolidated mainnet spot/futures credentials
 
 ### Internal Improvements
 - Refactored OKX adapter to Rust API clients
 - Refactored `BacktestDataIterator` (#2791) to consolidate data generator usage, thanks @faysou
+- Introduced `SharedCell` / `WeakCell` wrappers for ergonomic and safer handling of `Rc<RefCell<T>>` / `Weak<RefCell<T>>` pairs
 - Added stream iterators support `BacktestDataIterator`
 - Added serialization support for execution reports
 - Added serialization support for execution report commands
@@ -44,6 +53,8 @@ Released on TBD (UTC).
 - Optimized Redis key scans to improve efficiency over a network
 - Completed bar request implementation for OKX (#2789), thanks @nicolad
 - Enabled parallel pytest tests with `pytest-xdist` (#2808), thanks @stastnypremysl
+- Standardized DeFi chain name validation for `InstrumentId` (#2826), thanks @filipmacek
+- Improved typing for all the DEX IDs with `DexType` and add validation (#2827), thanks @filipmacek
 - Improved reconciliation handling of internally generated orders to align positions (now uses the `INTERNAL-DIFF` strategy ID)
 - Improved data client for blockchain adapter (#2787), thanks @filipmacek
 - Improved DEX pool sync process in the blockchain adapter (#2796), thanks @filipmacek
@@ -51,6 +62,7 @@ Released on TBD (UTC).
 - Improved `databento_test_request_bars` example (#2762), thanks @faysou
 - Improved zero-sized trades handling for Tardis CSV loader (will log a warning)
 - Improved ergonomics of `TardisInstrumentProvider` datetime filter params (can be either `pd.Timestamp` or Unix nanos `int`)
+- Improved handling of Tardis Machine websocket connection errors
 - Refined Rust catalog path handling (#2743), thanks @faysou
 - Refined Rust `GreeksCalculator` (#2760), thanks @faysou
 - Refined Databento bars timestamp decoding and backtest execution usage (#2800), thanks @faysou
@@ -65,8 +77,10 @@ Released on TBD (UTC).
 - Upgraded `tokio` crate to v1.47.1
 
 ### Fixes
+- Fixed Rust-Python reference cycles by replacing `Arc<PyObject>` with plain `PyObject` in callback-holding structs, eliminating memory leaks
 - Fixed `TimeEventHandler` memory leaks with Python callback references in FFI layer
 - Fixed `PyCapsule` memory leaks by adding destructors to enable proper Rust value cleanup
+- Fixed multiple circular-dependency memory leaks for network and bar Python callbacks using new `SharedCell`/`WeakCell` helpers
 - Fixed incorrect raw price type for matching engine in high-precision mode that could overflow during trades processing (#2810), thanks for reporting @Frzgunr1 and @happysammy
 - Fixed decoding zero-sized trades for Databento MBO data
 - Fixed purging of contingent orders where open linked orders would still be purged
@@ -81,6 +95,10 @@ Released on TBD (UTC).
 - Fixed dYdX Take Profit order type mapping error (#2758), thanks @nicolad
 - Fixed typo in logging for dYdX adapter (#2790), thanks @DeirhX
 - Fixed bars request pagination logic for OKX (#2798), thanks @nicolad
+- Fixed dYdX order and fill message schemas (#2824), thanks @davidsblom
+- Fixed Binance Spot testnet streaming URL, thanks for reporting @Frzgunr1
+- Fixed Binance Ed25519 key handling
+- Fixed RPC client content type header (#2828), thanks @filipmacek
 
 ### Documentation Updates
 - Added FFI Memory Contract developer guide
@@ -121,7 +139,7 @@ Released on 5th July 2025 (UTC).
 - Changed timer `allow_past=False` behavior: now validates the `next_event_time` instead of the `start_time`. This allows timers with past start times as long as their next scheduled event is still in the future
 - Changed behavior of timers `allow_past=False` to permit start times in the past if the next event time is still in the future
 - Changed Databento DBN upgrade policy to default v3
-- Removed `basename_template` from `ParquetDataCatalog.write_data(...)`, run `catalog.reset_catalog_file_names()` to update file names to the new convention
+- Removed `basename_template` from `ParquetDataCatalog.write_data(...)`, run `catalog.reset_all_file_names()` to update file names to the new convention
 - Removed problematic negative balance check for margin accounts (cash account negative balance check remains unchanged)
 - Removed support for Databento DBN v1 schemas (migrate to DBN v2 or v3, see [DBN Changelog](https://github.com/databento/dbn/blob/main/CHANGELOG.md#0350---2025-05-28))
 

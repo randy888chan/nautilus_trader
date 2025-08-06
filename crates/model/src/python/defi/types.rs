@@ -26,7 +26,7 @@ use nautilus_core::python::to_pyvalue_err;
 use pyo3::{basic::CompareOp, prelude::*};
 
 use crate::{
-    defi::{AmmType, Blockchain, Chain, Dex, Pool, Token, chain::chains},
+    defi::{AmmType, Blockchain, Chain, Dex, DexType, Pool, Token, chain::chains},
     identifiers::InstrumentId,
 };
 
@@ -70,6 +70,16 @@ impl Chain {
     #[pyo3(name = "set_rpc_url")]
     fn py_set_rpc_url(&mut self, rpc_url: String) {
         self.set_rpc_url(rpc_url);
+    }
+
+    #[staticmethod]
+    #[pyo3(name = "from_chain_name")]
+    fn py_from_chain_name(chain_name: &str) -> PyResult<Chain> {
+        Self::from_chain_name(chain_name).cloned().ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "`chain_name` '{chain_name}' is not recognized",
+            ))
+        })
     }
 
     #[staticmethod]
@@ -191,9 +201,11 @@ impl Dex {
         burn_event: String,
     ) -> PyResult<Self> {
         let amm_type = AmmType::from_str(&amm_type).map_err(to_pyvalue_err)?;
+        let dex_type = DexType::from_dex_name(&name)
+            .ok_or_else(|| to_pyvalue_err(format!("Invalid DEX name: {name}")))?;
         Ok(Self::new(
             chain,
-            name,
+            dex_type,
             factory,
             factory_creation_block,
             amm_type,
@@ -212,8 +224,8 @@ impl Dex {
 
     #[getter]
     #[pyo3(name = "name")]
-    fn py_name(&self) -> &str {
-        &self.name
+    fn py_name(&self) -> DexType {
+        self.name
     }
 
     #[getter]

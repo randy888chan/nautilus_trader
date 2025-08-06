@@ -53,7 +53,7 @@ use nautilus_model::{
         prices::{IndexPriceUpdate, MarkPriceUpdate},
         stubs::{stub_delta, stub_deltas, stub_depth10},
     },
-    defi::{AmmType, Dex, chain::chains},
+    defi::{AmmType, Dex, DexType, chain::chains},
     enums::{BookType, PriceType},
     identifiers::{ClientId, InstrumentId, TraderId, Venue},
     instruments::{CurrencyPair, Instrument, InstrumentAny, stubs::audusd_sim},
@@ -1552,7 +1552,8 @@ fn test_execute_subscribe_pool_swaps(
         &mut data_engine,
     );
 
-    let instrument_id = InstrumentId::from("WETH/USDT-3000.UniswapV3:Arbitrum");
+    let instrument_id =
+        InstrumentId::from("0x11b815efB8f581194ae79006d24E0d814B7697F6.Arbitrum:UniswapV3");
 
     let sub_cmd = DataCommand::DefiSubscribe(DefiSubscribeCommand::PoolSwaps(SubscribePoolSwaps {
         instrument_id,
@@ -1633,7 +1634,7 @@ fn test_process_pool_swap(data_engine: Rc<RefCell<DataEngine>>, data_client: Dat
     let chain = Arc::new(chains::ETHEREUM.clone());
     let dex = Arc::new(Dex::new(
         chains::ETHEREUM.clone(),
-        "Uniswap V3",
+        DexType::UniswapV3,
         "0x1F98431c8aD98523631AE4a59f267346ea31F984",
         0,
         AmmType::CLAMM,

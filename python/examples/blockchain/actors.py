@@ -43,6 +43,19 @@ class BlockchainActorConfig(DataActorConfig):
     client_id: ClientId | None = None
     pools: list[InstrumentId] | None = None
 
+    def __post_init__(self):
+        if isinstance(self.actor_id, str):
+            self.actor_id = ActorId(self.actor_id)
+
+        if isinstance(self.client_id, str):
+            self.client_id = ClientId(self.client_id)
+
+        if isinstance(self.pools, list) and self.pools and isinstance(self.pools[0], str):
+            self.pools = [InstrumentId.from_str(pool_str) for pool_str in self.pools]
+
+        if isinstance(self.chain, str):
+            self.chain = Chain.from_chain_name(self.chain)
+
 
 class BlockchainActor(DataActor):
 
@@ -53,7 +66,7 @@ class BlockchainActor(DataActor):
 
         self.chain = config.chain or Chain.ARBITRUM()
         self.client_id = config.client_id or ClientId(f"BLOCKCHAIN-{self.chain.name}")
-        self.pools = config.pools or [InstrumentId.from_str("WETH/USDC-3000.UniswapV3:Arbitrum")]
+        self.pools = config.pools or [InstrumentId.from_str("WETH/USDC-3000.Arbitrum:UniswapV3")]
 
     def on_start(self) -> None:
         """

@@ -34,7 +34,7 @@ use nautilus_infrastructure::sql::pg::PostgresConnectOptions;
 use nautilus_model::{
     defi::{
         Block, Blockchain, DefiData, Pool, PoolLiquidityUpdate, PoolLiquidityUpdateType, PoolSwap,
-        SharedChain, SharedDex, SharedPool, Token,
+        SharedChain, SharedDex, SharedPool, Token, validation::validate_address,
     },
     identifiers::{ClientId, Venue},
 };
@@ -58,7 +58,6 @@ use crate::{
         http::BlockchainHttpRpcClient,
         types::BlockchainMessage,
     },
-    validation::validate_address,
 };
 
 const BLOCKS_PROCESS_IN_SYNC_REPORT: u64 = 50000;
