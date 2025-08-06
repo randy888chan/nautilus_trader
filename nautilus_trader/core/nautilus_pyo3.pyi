@@ -3832,28 +3832,16 @@ class OwnOrderBook:
     def bid_quantity(
         self,
         status: set[OrderStatus] | None = None,
+        depth: int | None = None,
+        group_size: Decimal | None = None,
         accepted_buffer_ns: int | None = None,
         ts_now: int | None = None,
     ) -> dict[Decimal, Decimal]: ...
     def ask_quantity(
         self,
         status: set[OrderStatus] | None = None,
-        accepted_buffer_ns: int | None = None,
-        ts_now: int | None = None,
-    ) -> dict[Decimal, Decimal]: ...
-    def group_bids(
-        self,
-        group_size: Decimal,
         depth: int | None = None,
-        status: set[OrderStatus] | None = None,
-        accepted_buffer_ns: int | None = None,
-        ts_now: int | None = None,
-    ) -> dict[Decimal, Decimal]: ...
-    def group_asks(
-        self,
-        group_size: Decimal,
-        depth: int | None = None,
-        status: set[OrderStatus] | None = None,
+        group_size: Decimal | None = None,
         accepted_buffer_ns: int | None = None,
         ts_now: int | None = None,
     ) -> dict[Decimal, Decimal]: ...
@@ -4042,7 +4030,7 @@ class ParquetDataCatalogV2:
         data_cls: str,
         instrument_id: str | None = None,
     ) -> None: ...
-    def reset_catalog_file_names(self) -> None: ...
+    def reset_all_file_names(self) -> None: ...
     def extend_file_name(
         self,
         data_cls: str,
@@ -5911,6 +5899,7 @@ class OKXWebSocketClient:
         trigger_price: Price | None = None,
         post_only: bool | None = None,
         reduce_only: bool | None = None,
+        quote_quantity: bool | None = None,
         position_side: PositionSide | None = None,
     ) -> None: ...
     async def cancel_order(

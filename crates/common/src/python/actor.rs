@@ -46,7 +46,7 @@ use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 
 use crate::{
     actor::{
-        Actor, DataActor,
+        DataActor,
         data_actor::{DataActorConfig, DataActorCore, ImportableActorConfig},
         registry::try_get_actor_unchecked,
     },
